@@ -1,0 +1,6 @@
+{
+  "name": "Gestor de Expedientes y Documentos",
+  "description": "Plataforma para la gestión de expedientes, tareas, participantes y verificación documental para procesos administrativos, inmobiliarios y legales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
