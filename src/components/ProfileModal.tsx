@@ -213,17 +213,15 @@ export default function ProfileModal({
           // Asesor or Manager
           const isAnythingChanged = 
             name !== currentUser.name || 
-            email !== currentUser.email || 
-            phone !== (currentUser.phone || "") ||
-            address !== (currentUser.address || "");
+            email !== currentUser.email;
 
           if (isAnythingChanged) {
             setMessage({
-              text: `Se actualizó tu foto de perfil. Los cambios a tus datos sensibles (nombre, correo, teléfono o dirección) requieren la autorización del Director General y se han enviado en revisión.`,
+              text: `Se actualizó tu foto de perfil, teléfono y dirección. Los cambios a tu nombre o correo requieren la autorización del Director General y se han enviado en revisión.`,
               type: "info"
             });
           } else {
-            setMessage({ text: "Tu foto de perfil ha sido actualizada exitosamente.", type: "success" });
+            setMessage({ text: "Tu perfil ha sido actualizado exitosamente.", type: "success" });
           }
         }
         

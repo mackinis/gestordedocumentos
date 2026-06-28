@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   Users,
   FileText,
   CheckCircle2,
@@ -26,7 +27,8 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronDown,
-  Info
+  Info,
+  X
 } from "lucide-react";
 import { Case, User, Participant, Observation } from "../types";
 import { getTranslations } from "../utils/commercialTranslations";
@@ -125,6 +127,10 @@ export default function CaseDetails({
   const [editVendedores, setEditVendedores] = useState(1);
   const [editGarantes, setEditGarantes] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // States for the popup form group modals and tabbed content
+  const [activeFormGroup, setActiveFormGroup] = useState<{ reqId: string; role: string } | null>(null);
+  const [activeFormTab, setActiveFormTab] = useState<number>(0);
 
   // Block info warning modal state
   const [blockDetails, setBlockDetails] = useState<any | null>(null);
@@ -244,6 +250,48 @@ export default function CaseDetails({
   const [adjDetails, setAdjDetails] = useState<string>("");
   const [rejectionAdjId, setRejectionAdjId] = useState<string | null>(null);
   const [rejectionReasonText, setRejectionReasonText] = useState<string>("");
+
+  // States for part adjustment request widget next to "Copias de DNI de las Partes"
+  const [reqPartAction, setReqPartAction] = useState<"ADD" | "REMOVE">("ADD");
+  const [reqPartRole, setReqPartRole] = useState<string>("comprador");
+  const [reqPartCustomRole, setReqPartCustomRole] = useState<string>("");
+  const [reqPartDetails, setReqPartDetails] = useState<string>("");
+
+  const handleSendPartAdjustment = () => {
+    if (!reqPartDetails.trim()) {
+      alert("Por favor indique el motivo o especificación detallada del ajuste.");
+      return;
+    }
+
+    const finalRole = reqPartRole === "otro" ? reqPartCustomRole.trim() : reqPartRole;
+    if (!finalRole) {
+      alert("Por favor especifique el rol.");
+      return;
+    }
+
+    if (onAddAdjustmentRequest) {
+      let targetPartyKey: any = "compradores";
+      if (finalRole.toLowerCase() === "vendedor") targetPartyKey = "vendedores";
+      else if (finalRole.toLowerCase() === "garante") targetPartyKey = "garantes";
+      
+      const actionLabel = reqPartAction === "ADD" ? "ALTA (Agregar)" : "BAJA (Quitar)";
+      
+      const payload: any = {
+        type: "FORM_COUNT",
+        targetParty: targetPartyKey,
+        action: reqPartAction,
+        quantity: 1,
+        details: `[SOLICITUD ${actionLabel} - ROL: ${finalRole.toUpperCase()}] Justificación: ${reqPartDetails.trim()}`
+      };
+
+      onAddAdjustmentRequest(caseDetails.id, payload);
+
+      // Reset form
+      setReqPartDetails("");
+      setReqPartCustomRole("");
+      alert("¡Solicitud de ajuste enviada con éxito!");
+    }
+  };
 
   const handleCreateAdjustmentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1275,150 +1323,106 @@ export default function CaseDetails({
                       {type === "FORM" && (
                         <div className="w-full space-y-4">
                           {task && task.formInstances && task.formInstances.length > 0 ? (
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
-                              {task.formInstances.map((inst: any) => {
-                                const isEditing = editingInstanceId === inst.id;
-                                const isComplete = inst.status === "COMPLETA" && !isEditing;
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
+                              {(() => {
+                                // Group instances by role
+                                const groups: Record<string, any[]> = {};
+                                task.formInstances.forEach((inst: any) => {
+                                  const r = inst.role || "General";
+                                  if (!groups[r]) groups[r] = [];
+                                  groups[r].push(inst);
+                                });
 
-                                return (
-                                  <div key={inst.id} className={`p-6 bg-slate-50/75 border border-slate-200/90 rounded-2xl text-xs space-y-4 text-left h-auto flex flex-col justify-between hover:border-slate-300 hover:bg-slate-50 transition-all shadow-3xs ${
-                                    !isComplete ? "lg:col-span-2 border-indigo-150/85 bg-indigo-50/5" : ""
-                                  }`}>
-                                    <div>
-                                      <div className="flex items-center justify-between border-b border-slate-150 pb-2.5 mb-3">
-                                        <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                                          <span className="inline-block w-2 h-2 rounded-full bg-indigo-500" />
-                                          {(() => {
-                                            if (!inst.role || inst.role === "General") {
-                                              return req.name;
-                                            }
-                                            let baseName = req.name;
-                                            if (inst.role === "Comprador") {
-                                              baseName = baseName
-                                                .replace(/Vendedores/g, "Compradores")
-                                                .replace(/vendedores/g, "compradores")
-                                                .replace(/Garantes/g, "Compradores")
-                                                .replace(/garantes/g, "compradores");
-                                            } else if (inst.role === "Vendedor") {
-                                              baseName = baseName
-                                                .replace(/Compradores/g, "Vendedores")
-                                                .replace(/compradores/g, "vendedores")
-                                                .replace(/Garantes/g, "Vendedores")
-                                                .replace(/garantes/g, "vendedores");
-                                            } else if (inst.role === "Garante") {
-                                              baseName = baseName
-                                                .replace(/Vendedores/g, "Garantes")
-                                                .replace(/vendedores/g, "garantes")
-                                                .replace(/Compradores/g, "Garantes")
-                                                .replace(/compradores/g, "garantes");
-                                            }
-                                            return `${baseName} (${inst.role} ${inst.index})`;
-                                          })()}
-                                        </span>
-                                        {isComplete ? (
-                                          <span className="text-[9px] bg-teal-50 text-teal-700 border border-teal-200 font-bold px-2 py-0.5 rounded-md uppercase font-mono">
-                                            COMPLETO ✓
-                                          </span>
-                                        ) : (
-                                          <span className="text-[9px] bg-amber-50 text-amber-700 border border-amber-200 font-bold px-2 py-0.5 rounded-md uppercase font-mono animate-pulse">
-                                            PENDIENTE
-                                          </span>
-                                        )}
+                                return Object.entries(groups).map(([role, list]) => {
+                                  const completedCount = list.filter((inst: any) => inst.status === "COMPLETA").length;
+                                  const totalCount = list.length;
+                                  const isAllComplete = completedCount === totalCount;
+                                  
+                                  // Pick a nice color accent for each role
+                                  let roleTitle = role;
+                                  let colorClasses = "bg-indigo-50/40 border-indigo-100 text-indigo-800";
+                                  let bgHoverClasses = "hover:bg-indigo-50 hover:border-indigo-300";
+                                  let progressColor = "bg-indigo-600";
+                                  
+                                  const normalizedRole = role.toLowerCase();
+                                  if (normalizedRole === "comprador") {
+                                    roleTitle = "Compradores";
+                                    colorClasses = "bg-sky-50/40 border-sky-100 text-sky-850";
+                                    bgHoverClasses = "hover:bg-sky-50 hover:border-sky-300";
+                                    progressColor = "bg-sky-600";
+                                  } else if (normalizedRole === "vendedor") {
+                                    roleTitle = "Vendedores";
+                                    colorClasses = "bg-teal-50/40 border-teal-100 text-teal-850";
+                                    bgHoverClasses = "hover:bg-teal-50 hover:border-teal-300";
+                                    progressColor = "bg-teal-600";
+                                  } else if (normalizedRole === "garante") {
+                                    roleTitle = "Garantes";
+                                    colorClasses = "bg-purple-50/40 border-purple-100 text-purple-850";
+                                    bgHoverClasses = "hover:bg-purple-50 hover:border-purple-300";
+                                    progressColor = "bg-purple-600";
+                                  } else if (normalizedRole === "escribano") {
+                                    roleTitle = "Escribanos";
+                                    colorClasses = "bg-amber-50/40 border-amber-100 text-amber-850";
+                                    bgHoverClasses = "hover:bg-amber-50 hover:border-amber-300";
+                                    progressColor = "bg-amber-650";
+                                  }
+
+                                  return (
+                                    <button
+                                      key={role}
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveFormGroup({ reqId: rId, role });
+                                        setActiveFormTab(0);
+                                      }}
+                                      className={`p-4.5 rounded-2xl border text-left flex flex-col justify-between transition-all cursor-pointer shadow-3xs group ${colorClasses} ${bgHoverClasses}`}
+                                    >
+                                      <div className="w-full">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center gap-1.5">
+                                            <div className="p-1.5 bg-white rounded-lg shadow-4xs group-hover:scale-105 transition-transform">
+                                              <Users className="h-3.5 w-3.5" />
+                                            </div>
+                                            <span className="font-display font-bold text-xs tracking-tight text-slate-800">
+                                              {roleTitle}
+                                            </span>
+                                          </div>
+                                          {isAllComplete ? (
+                                            <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md uppercase font-mono">
+                                              Listo ✓
+                                            </span>
+                                          ) : (
+                                            <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-md uppercase font-mono animate-pulse">
+                                              Pendiente
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+                                          Registrar los datos de {roleTitle.toLowerCase()} para este {translations.caseSingular.toLowerCase()}.
+                                        </p>
                                       </div>
 
-                                      {isComplete ? (
-                                        <div className="space-y-3">
-                                          <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-3 shadow-3xs divide-y divide-slate-100">
-                                            {Object.entries(inst.formValues || {}).map(([key, value], idx) => (
-                                              <div key={key} className={`text-[11px] leading-relaxed text-slate-700 ${idx > 0 ? "pt-2.5" : ""}`}>
-                                                <span className="font-semibold text-slate-400 uppercase text-[9px] font-mono tracking-wider block mb-1">{getAdaptedFieldLabel(key, inst.role)}</span> 
-                                                <span className="text-slate-900 font-medium bg-slate-50/50 px-2 py-1 rounded-md border border-slate-100/50 inline-block min-w-[120px]">{String(value) || "—"}</span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                          
-                                          {/* Allow Manager/Admin or Advisor to correct/edit the form info */}
-                                          <div className="pt-2 flex justify-between items-center text-[9px] text-slate-400 font-mono mt-2">
-                                            <span>Por {inst.completedBy || "Asesor"}</span>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setTempFormValues(prev => ({
-                                                  ...prev,
-                                                  [`${rId}_${inst.id}`]: { ...(inst.formValues || {}) }
-                                                }));
-                                                setEditingInstanceId(inst.id);
-                                              }}
-                                              className="text-indigo-600 hover:text-indigo-850 font-bold uppercase tracking-wider underline cursor-pointer"
-                                            >
-                                              Editar / Corregir
-                                            </button>
-                                          </div>
+                                      <div className="w-full space-y-1.5 mt-auto">
+                                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 font-mono">
+                                          <span>Completados</span>
+                                          <span>{completedCount} de {totalCount}</span>
                                         </div>
-                                      ) : (
-                                        status !== "FINALIZADO" && (
-                                          <div className="space-y-4 pt-1">
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">Ingreso de Datos Obligatorios</p>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                              {(req.formFields || []).map((field: any) => {
-                                                const currentVal = tempFormValues[`${rId}_${inst.id}`]?.[field.name] !== undefined
-                                                  ? tempFormValues[`${rId}_${inst.id}`]?.[field.name]
-                                                  : (inst.formValues?.[field.name] || "");
-
-                                                const isTextArea = field.type === "textarea";
-
-                                                return (
-                                                  <div key={field.name} className={isTextArea ? "sm:col-span-2" : ""}>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
-                                                      {getAdaptedFieldLabel(field.label, inst.role)} {field.required && "*"}
-                                                    </label>
-                                                    {isTextArea ? (
-                                                      <textarea
-                                                        required={field.required}
-                                                        value={currentVal}
-                                                        onChange={(e) => updateFormValue(rId, field.name, e.target.value, inst.id)}
-                                                        placeholder={`Completar...`}
-                                                        className="w-full border border-slate-200/85 rounded-xl px-3 py-2 text-xs bg-white text-slate-900 focus:outline-hidden focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 min-h-[75px] font-medium transition-all"
-                                                      />
-                                                    ) : (
-                                                      <input
-                                                        type={field.type === "number" ? "number" : "text"}
-                                                        required={field.required}
-                                                        value={currentVal}
-                                                        onChange={(e) => updateFormValue(rId, field.name, e.target.value, inst.id)}
-                                                        placeholder={`Completar...`}
-                                                        className="w-full border border-slate-200/85 rounded-xl px-3 py-2 text-xs bg-white text-slate-900 focus:outline-hidden focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 font-medium transition-all"
-                                                      />
-                                                    )}
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                            <div className="flex gap-2.5 pt-3 border-t border-slate-150/60 mt-4">
-                                              {isEditing && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setEditingInstanceId(null)}
-                                                  className="flex-1 py-2 text-[11px] font-bold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl cursor-pointer transition-all"
-                                                >
-                                                  Cancelar
-                                                </button>
-                                              )}
-                                              <button
-                                                type="button"
-                                                onClick={() => submitFormRequirement(rId, inst.id)}
-                                                className="flex-2 py-2 text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl cursor-pointer transition-all shadow-xs focus:ring-4 focus:ring-indigo-600/10"
-                                              >
-                                                Guardar Formulario
-                                              </button>
-                                            </div>
-                                          </div>
-                                        )
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                                        <div className="w-full bg-slate-200/60 h-1 rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full rounded-full transition-all duration-300 ${progressColor}`}
+                                            style={{ width: `${(completedCount/totalCount)*100}%` }}
+                                          />
+                                        </div>
+                                        <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-650 group-hover:translate-x-1 transition-transform pt-1">
+                                          <span>Ver / Completar</span>
+                                          <ArrowRight className="h-3 w-3" />
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                });
+                              })()}
                             </div>
                           ) : (
                             /* Fallback legacy single form behavior if case is old or has no party instances */
@@ -1593,6 +1597,88 @@ export default function CaseDetails({
                           className="px-3 py-1.5 bg-slate-900 text-white text-[10px] font-bold rounded-lg hover:bg-slate-800 cursor-pointer"
                         >
                           Guardar Configuración
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Widget de Alta o Baja de Formulario/Parte (Asesores) */}
+                  {rName === "Copias de DNI de las Partes" && currentUser.role === "ASESOR" && status !== "FINALIZADO" && (
+                    <div className="mt-4 p-4.5 bg-indigo-50/20 border border-indigo-150/80 rounded-2xl space-y-3 text-left">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-indigo-650" />
+                        <span className="text-xs font-bold text-slate-800">Solicitar Alta o Baja de Participantes / Formularios</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-normal">
+                        Si falta o sobra algún comprador, vendedor, garante, escribano u otro participante, solicite la alta o baja completando los datos a continuación:
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Acción Solicitada</label>
+                          <select
+                            value={reqPartAction}
+                            onChange={(e) => setReqPartAction(e.target.value as "ADD" | "REMOVE")}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium"
+                          >
+                            <option value="ADD">Solicitar ALTA (Agregar)</option>
+                            <option value="REMOVE">Solicitar BAJA (Quitar)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Rol / Tipo de Parte</label>
+                          <select
+                            value={reqPartRole}
+                            onChange={(e) => {
+                              setReqPartRole(e.target.value);
+                              if (e.target.value !== "otro") {
+                                setReqPartCustomRole("");
+                              }
+                            }}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium"
+                          >
+                            <option value="comprador">Comprador</option>
+                            <option value="vendedor">Vendedor</option>
+                            <option value="garante">Garante</option>
+                            <option value="escribano">Escribano</option>
+                            <option value="otro">Otro (Especificar)</option>
+                          </select>
+                        </div>
+
+                        {reqPartRole === "otro" && (
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Especificar Rol</label>
+                            <input
+                              type="text"
+                              value={reqPartCustomRole}
+                              onChange={(e) => setReqPartCustomRole(e.target.value)}
+                              placeholder="Ej: Escribano suplente, etc."
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 font-medium"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Campo de Aclaración Específica (Para el Manager/Admin)</label>
+                        <textarea
+                          rows={2.5}
+                          value={reqPartDetails}
+                          onChange={(e) => setReqPartDetails(e.target.value)}
+                          placeholder="Ej: Faltan agregar 2 vendedores ya que hay dos firmas en la escritura, o remover 1 comprador..."
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-4 focus:ring-indigo-500/10"
+                        />
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={handleSendPartAdjustment}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Enviar Solicitud
                         </button>
                       </div>
                     </div>
@@ -3105,6 +3191,213 @@ export default function CaseDetails({
           </div>
         </div>
       )}
+
+      {/* Tabbed Form Instances Popup Modal */}
+      {activeFormGroup && (() => {
+        const { reqId, role } = activeFormGroup;
+        const req = caseDetails.requirements?.find((r: any) => r.id === reqId);
+        if (!req || !req.task || !req.task.formInstances) return null;
+        
+        // Filter the instances that match this role
+        const roleInstances = req.task.formInstances.filter((inst: any) => (inst.role || "General") === role);
+        if (roleInstances.length === 0) return null;
+        
+        // Make sure activeFormTab is within range
+        const activeIdx = activeFormTab >= roleInstances.length ? 0 : activeFormTab;
+        const activeInst = roleInstances[activeIdx];
+        
+        const isEditing = editingInstanceId === activeInst.id;
+        const isComplete = activeInst.status === "COMPLETA" && !isEditing;
+
+        // Count totals for headers
+        const totalCount = roleInstances.length;
+        const completedCount = roleInstances.filter((inst: any) => inst.status === "COMPLETA").length;
+
+        let roleTitle = role;
+        if (role.toLowerCase() === "comprador") roleTitle = "Compradores";
+        else if (role.toLowerCase() === "vendedor") roleTitle = "Vendedores";
+        else if (role.toLowerCase() === "garante") roleTitle = "Garantes";
+        else if (role.toLowerCase() === "escribano") roleTitle = "Escribanos";
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+            <div className="bg-white border text-slate-900 border-slate-200 rounded-3xl w-full max-w-3xl shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] overflow-hidden">
+              
+              {/* Modal Header */}
+              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h3 className="font-display font-bold text-base text-slate-800 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-indigo-600" />
+                    Formularios de {roleTitle}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Progreso: {completedCount} de {totalCount} completados
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFormGroup(null);
+                    setEditingInstanceId(null);
+                  }}
+                  className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition-all cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Tabs list (solapas) */}
+              <div className="px-6 bg-slate-50/20 border-b border-slate-100 flex gap-2 overflow-x-auto scrollbar-hidden">
+                {roleInstances.map((inst: any, idx: number) => {
+                  const isActive = idx === activeIdx;
+                  const instComplete = inst.status === "COMPLETA";
+                  
+                  let tabColorClasses = "text-slate-500 hover:text-slate-850 border-transparent";
+                  if (isActive) {
+                    tabColorClasses = "text-indigo-600 border-indigo-605 bg-white shadow-3xs font-semibold";
+                  } else if (instComplete) {
+                    tabColorClasses = "text-emerald-600 hover:text-emerald-700 border-transparent bg-emerald-50/30";
+                  }
+
+                  return (
+                    <button
+                      key={inst.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveFormTab(idx);
+                        setEditingInstanceId(null);
+                      }}
+                      className={`px-4 py-3 text-xs font-medium border-b-2 transition-all cursor-pointer whitespace-nowrap rounded-t-xl ${tabColorClasses}`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {instComplete && <span className="text-emerald-500 text-[10px]">✓</span>}
+                        {role} {inst.index}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Modal Content - Scrollable Form or view */}
+              <div className="p-6 overflow-y-auto flex-1 bg-white">
+                {isComplete ? (
+                  // Read Only view
+                  <div className="space-y-5 animate-in fade-in duration-200">
+                    <div className="bg-slate-50/50 p-5 rounded-2xl border border-slate-100 space-y-4 divide-y divide-slate-100/80">
+                      {Object.entries(activeInst.formValues || {}).map(([key, value], idx) => (
+                        <div key={key} className={`text-xs leading-relaxed text-slate-700 ${idx > 0 ? "pt-3" : ""}`}>
+                          <span className="font-semibold text-slate-400 uppercase text-[9px] font-mono tracking-wider block mb-1">
+                            {getAdaptedFieldLabel(key, role)}
+                          </span>
+                          <span className="text-slate-900 font-medium bg-white px-3 py-1.5 rounded-xl border border-slate-150 inline-block min-w-[150px] shadow-3xs">
+                            {String(value) || "—"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Completado por: {activeInst.completedBy || "Asesor"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempFormValues(prev => ({
+                            ...prev,
+                            [`${reqId}_${activeInst.id}`]: { ...(activeInst.formValues || {}) }
+                          }));
+                          setEditingInstanceId(activeInst.id);
+                        }}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-indigo-650 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-3xs"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        Editar / Corregir Datos
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // Edit form view
+                  caseDetails.status !== "FINALIZADO" ? (
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        submitFormRequirement(reqId, activeInst.id);
+                      }}
+                      className="space-y-6 animate-in fade-in duration-200"
+                    >
+                      <div className="bg-indigo-50/30 border border-indigo-100/50 p-4 rounded-2xl flex items-start gap-2.5">
+                        <Info className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
+                        <div className="text-[11px] text-indigo-900 leading-relaxed font-medium">
+                          Por favor complete todos los datos requeridos para registrar correctamente los datos de <b>{role} {activeInst.index}</b>.
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        {(req.formFields || []).map((field: any) => {
+                          const currentVal = tempFormValues[`${reqId}_${activeInst.id}`]?.[field.name] !== undefined
+                            ? tempFormValues[`${reqId}_${activeInst.id}`]?.[field.name]
+                            : (activeInst.formValues?.[field.name] || "");
+
+                          const isTextArea = field.type === "textarea";
+
+                          return (
+                            <div key={field.name} className={isTextArea ? "sm:col-span-2" : ""}>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">
+                                {getAdaptedFieldLabel(field.label, role)} {field.required && "*"}
+                              </label>
+                              {isTextArea ? (
+                                <textarea
+                                  required={field.required}
+                                  value={currentVal}
+                                  onChange={(e) => updateFormValue(reqId, field.name, e.target.value, activeInst.id)}
+                                  placeholder={`Ingresar datos...`}
+                                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs bg-white text-slate-900 focus:outline-hidden focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 min-h-[90px] font-medium transition-all shadow-3xs"
+                                />
+                              ) : (
+                                <input
+                                  type={field.type === "number" ? "number" : "text"}
+                                  required={field.required}
+                                  value={currentVal}
+                                  onChange={(e) => updateFormValue(reqId, field.name, e.target.value, activeInst.id)}
+                                  placeholder={`Ingresar datos...`}
+                                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs bg-white text-slate-900 focus:outline-hidden focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 font-medium transition-all shadow-3xs"
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex gap-3 pt-4 border-t border-slate-100 justify-end">
+                        {isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingInstanceId(null)}
+                            className="px-4 py-2 text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl cursor-pointer transition-all shadow-3xs"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          className="px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl cursor-pointer transition-all shadow-md focus:ring-4 focus:ring-indigo-600/10"
+                        >
+                          Guardar Datos de {role} {activeInst.index}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="text-center py-10 text-slate-400 italic text-xs">
+                      El caso está finalizado. No se permiten ediciones.
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

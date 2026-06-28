@@ -71,6 +71,7 @@ interface DbSchema {
   tasks: any[];
   observations: any[];
   notifications: any[];
+  messages?: any[];
   auditLogs: any[];
   profileRequests: any[];
   caseRequests?: any[];
@@ -88,6 +89,7 @@ let db: DbSchema = {
   tasks: [],
   observations: [],
   notifications: [],
+  messages: [],
   auditLogs: [],
   profileRequests: [],
   caseRequests: [],
@@ -213,6 +215,7 @@ async function syncToFirestore() {
       "tasks",
       "observations",
       "notifications",
+      "messages",
       "auditLogs",
       "profileRequests",
       "settings",
@@ -565,7 +568,42 @@ async function initDb() {
       twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || "",
       twilioFromNumber: process.env.TWILIO_FROM_NUMBER || "",
       commercialFocus: "general",
-      allowAdvisorViewProductivity: false
+      allowAdvisorViewProductivity: false,
+      messagingSettings: {
+        allowedSenders: ["ADMIN", "MANAGER", "ASESOR"],
+        awaitReplyRule: false,
+        allowedChannels: [
+          { from: "ASESOR", to: "ASESOR", enabled: true },
+          { from: "ASESOR", to: "MANAGER", enabled: true },
+          { from: "ASESOR", to: "ADMIN", enabled: true },
+          { from: "MANAGER", to: "MANAGER", enabled: true },
+          { from: "MANAGER", to: "ASESOR", enabled: true },
+          { from: "MANAGER", to: "ADMIN", enabled: true },
+          { from: "ADMIN", to: "ASESOR", enabled: true },
+          { from: "ADMIN", to: "MANAGER", enabled: true },
+          { from: "ADMIN", to: "ADMIN", enabled: true }
+        ]
+      }
+    };
+  }
+  if (!db.messages) {
+    db.messages = [];
+  }
+  if (db.settings && !db.settings.messagingSettings) {
+    db.settings.messagingSettings = {
+      allowedSenders: ["ADMIN", "MANAGER", "ASESOR"],
+      awaitReplyRule: false,
+      allowedChannels: [
+        { from: "ASESOR", to: "ASESOR", enabled: true },
+        { from: "ASESOR", to: "MANAGER", enabled: true },
+        { from: "ASESOR", to: "ADMIN", enabled: true },
+        { from: "MANAGER", to: "MANAGER", enabled: true },
+        { from: "MANAGER", to: "ASESOR", enabled: true },
+        { from: "MANAGER", to: "ADMIN", enabled: true },
+        { from: "ADMIN", to: "ASESOR", enabled: true },
+        { from: "ADMIN", to: "MANAGER", enabled: true },
+        { from: "ADMIN", to: "ADMIN", enabled: true }
+      ]
     };
   }
   if (db.settings && db.settings.allowAdvisorViewProductivity === undefined) {
@@ -1386,17 +1424,25 @@ app.post("/api/profile/update", (req, res) => {
   }
 
   // Check what is immediate and what needs request
-  // 1. Avatar update is immediate for both ASESOR and MANAGER
+  // 1. Avatar, Phone and Address updates are immediate for both ASESOR and MANAGER
   if (avatarUrl && avatarUrl !== user.avatarUrl) {
     user.avatarUrl = avatarUrl;
     logAudit(user.id, "AVATAR_UPDATED", "USER", user.id, `${user.name} actualizó su fotografía de perfil.`);
+  }
+  if (phone !== undefined && phone !== user.phone) {
+    user.phone = phone;
+    logAudit(user.id, "PHONE_UPDATED", "USER", user.id, `${user.name} actualizó su teléfono de contacto.`);
+  }
+  if (address !== undefined && address !== user.address) {
+    user.address = address;
+    logAudit(user.id, "ADDRESS_UPDATED", "USER", user.id, `${user.name} actualizó su dirección residencial.`);
   }
 
   // Check if there are sensitive pending fields that requested changes
   const sensitiveFieldsRequested: any = {};
   let needsRequest = false;
 
-  // For ASESOR and MANAGER: name, email, phone, and address are sensitive and require request
+  // For ASESOR and MANAGER: name and email are sensitive and require request
   if (user.role === "ASESOR" || user.role === "MANAGER") {
     if (name && name !== user.name) {
       sensitiveFieldsRequested.name = name;
@@ -1404,14 +1450,6 @@ app.post("/api/profile/update", (req, res) => {
     }
     if (email && email !== user.email) {
       sensitiveFieldsRequested.email = email;
-      needsRequest = true;
-    }
-    if (phone && phone !== user.phone) {
-      sensitiveFieldsRequested.phone = phone;
-      needsRequest = true;
-    }
-    if (address && address !== user.address) {
-      sensitiveFieldsRequested.address = address;
       needsRequest = true;
     }
   }
@@ -3825,6 +3863,320 @@ app.post("/api/notifications/:id/read", (req, res) => {
   }
 });
 
+app.post("/api/notifications/:id/archive", (req, res) => {
+  const { id } = req.params;
+  const { archived } = req.body;
+  const not = db.notifications.find((n) => n.id === id);
+  if (not) {
+    not.archived = archived !== undefined ? archived : true;
+    saveDb();
+    res.json(not);
+  } else {
+    res.status(404).json({ message: "Notificación no encontrada" });
+  }
+});
+
+app.delete("/api/notifications/:id", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).json({ message: "No autenticado" });
+  }
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const { id } = req.params;
+  const index = db.notifications.findIndex((n) => n.id === id);
+
+  if (index !== -1) {
+    const notif = db.notifications[index];
+    let allowed = false;
+    if (requester.role === "ADMIN") {
+      allowed = true;
+    } else if (requester.role === "MANAGER") {
+      if (notif.userId === requester.id) {
+        allowed = true;
+      } else {
+        const targetUser = db.users.find((u) => u.id === notif.userId);
+        if (targetUser && targetUser.role === "ASESOR") {
+          allowed = true;
+        }
+      }
+    } else {
+      if (notif.userId === requester.id) {
+        allowed = true;
+      }
+    }
+
+    if (allowed) {
+      db.notifications.splice(index, 1);
+      saveDb();
+      return res.json({ success: true, id });
+    } else {
+      return res.status(403).json({ message: "No autorizado para eliminar esta notificación" });
+    }
+  } else {
+    res.status(404).json({ message: "Notificación no encontrada" });
+  }
+});
+
+// --------------------------------------------------------
+// INTERNAL MESSAGING SYSTEM ENDPOINTS
+// --------------------------------------------------------
+
+app.get("/api/admin/messaging-settings", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester || requester.role !== "ADMIN") {
+    return res.status(403).json({ message: "No autorizado" });
+  }
+
+  res.json(db.settings.messagingSettings);
+});
+
+app.post("/api/admin/messaging-settings", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester || requester.role !== "ADMIN") {
+    return res.status(403).json({ message: "No autorizado" });
+  }
+
+  const { allowedSenders, awaitReplyRule, allowedChannels } = req.body;
+  
+  db.settings.messagingSettings = {
+    allowedSenders: allowedSenders || db.settings.messagingSettings.allowedSenders,
+    awaitReplyRule: awaitReplyRule !== undefined ? awaitReplyRule : db.settings.messagingSettings.awaitReplyRule,
+    allowedChannels: allowedChannels || db.settings.messagingSettings.allowedChannels,
+  };
+
+  saveDb();
+  res.json({ success: true, messagingSettings: db.settings.messagingSettings });
+});
+
+app.get("/api/messages", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const { box } = req.query; // inbox, sent, trash
+  let list = db.messages || [];
+
+  if (box === "sent") {
+    list = list.filter((m) => m.senderId === requester.id && !m.senderTrash && !m.senderDeleted);
+  } else if (box === "trash") {
+    list = list.filter((m) => 
+      (m.senderId === requester.id && m.senderTrash && !m.senderDeleted) ||
+      (m.recipientId === requester.id && m.recipientTrash && !m.recipientDeleted)
+    );
+  } else {
+    // default to inbox
+    list = list.filter((m) => m.recipientId === requester.id && !m.recipientTrash && !m.recipientDeleted);
+  }
+
+  // Sort by date descending
+  list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  res.json(list);
+});
+
+app.post("/api/messages", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const mSettings = db.settings.messagingSettings;
+  if (!mSettings.allowedSenders.includes(requester.role)) {
+    return res.status(403).json({ message: "Tu rol no tiene permitido enviar mensajes en la plataforma." });
+  }
+
+  const { recipientId, subject, body, attachments, parentMessageId } = req.body;
+  const recipient = db.users.find((u) => u.id === recipientId);
+  if (!recipient) {
+    return res.status(404).json({ message: "El usuario destinatario no existe." });
+  }
+
+  // Check channel config
+  const channel = mSettings.allowedChannels.find((c: any) => c.from === requester.role && c.to === recipient.role);
+  if (!channel || !channel.enabled) {
+    return res.status(403).json({ message: `La mensajería entre el rol ${requester.role} y ${recipient.role} no está habilitada.` });
+  }
+
+  // Check awaitReplyRule
+  if (mSettings.awaitReplyRule) {
+    const conversation = (db.messages || []).filter((m) => 
+      !m.senderDeleted && !m.recipientDeleted &&
+      ((m.senderId === requester.id && m.recipientId === recipientId) ||
+       (m.senderId === recipientId && m.recipientId === requester.id))
+    );
+    
+    if (conversation.length > 0) {
+      conversation.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const latestMsg = conversation[0];
+      if (latestMsg.senderId === requester.id) {
+        return res.status(400).json({ 
+          message: "Norma de Respuesta Requerida activa: Debes esperar a recibir una respuesta de este usuario antes de poder enviarle otro mensaje." 
+        });
+      }
+    }
+  }
+
+  const newMessage = {
+    id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    senderId: requester.id,
+    senderName: requester.name,
+    senderRole: requester.role,
+    recipientId: recipient.id,
+    recipientName: recipient.name,
+    recipientRole: recipient.role,
+    subject: subject || "(Sin Asunto)",
+    body: body || "",
+    attachments: attachments || [],
+    createdAt: new Date().toISOString(),
+    read: false,
+    senderTrash: false,
+    recipientTrash: false,
+    senderDeleted: false,
+    recipientDeleted: false,
+    parentMessageId: parentMessageId || null
+  };
+
+  db.messages = db.messages || [];
+  db.messages.push(newMessage);
+
+  // Auto-generate notification for the recipient
+  db.notifications = db.notifications || [];
+  db.notifications.push({
+    id: `not-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    userId: recipient.id,
+    title: `Nuevo mensaje de ${requester.name}`,
+    message: `Has recibido un nuevo mensaje: "${subject || '(Sin Asunto)'}"`,
+    type: "INFO",
+    read: false,
+    archived: false,
+    createdAt: new Date().toISOString()
+  });
+
+  saveDb();
+  res.status(201).json(newMessage);
+});
+
+app.post("/api/messages/:id/read", (req, res) => {
+  const { id } = req.params;
+  const msg = db.messages?.find((m) => m.id === id);
+  if (msg) {
+    msg.read = true;
+    saveDb();
+    res.json(msg);
+  } else {
+    res.status(404).json({ message: "Mensaje no encontrado" });
+  }
+});
+
+app.post("/api/messages/:id/trash", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const { id } = req.params;
+  const msg = db.messages?.find((m) => m.id === id);
+  if (msg) {
+    if (msg.senderId === requester.id) {
+      msg.senderTrash = true;
+    }
+    if (msg.recipientId === requester.id) {
+      msg.recipientTrash = true;
+    }
+    saveDb();
+    res.json(msg);
+  } else {
+    res.status(404).json({ message: "Mensaje no encontrado" });
+  }
+});
+
+app.post("/api/messages/:id/restore", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const { id } = req.params;
+  const msg = db.messages?.find((m) => m.id === id);
+  if (msg) {
+    if (msg.senderId === requester.id) {
+      msg.senderTrash = false;
+    }
+    if (msg.recipientId === requester.id) {
+      msg.recipientTrash = false;
+    }
+    saveDb();
+    res.json(msg);
+  } else {
+    res.status(404).json({ message: "Mensaje no encontrado" });
+  }
+});
+
+app.delete("/api/messages/:id", (req, res) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) return res.status(401).json({ message: "No autenticado" });
+  const token = authorization.replace("Bearer ", "");
+  const userId = token.replace("real-jwt-token-for-", "");
+  const requester = db.users.find((u) => u.id === userId);
+
+  if (!requester) {
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+
+  const { id } = req.params;
+  const msg = db.messages?.find((m) => m.id === id);
+  if (msg) {
+    if (msg.senderId === requester.id) {
+      msg.senderDeleted = true;
+    }
+    if (msg.recipientId === requester.id) {
+      msg.recipientDeleted = true;
+    }
+    saveDb();
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ message: "Mensaje no encontrado" });
+  }
+});
+
 app.post("/api/notifications/read-all", (req, res) => {
   const authorization = req.headers.authorization;
   if (!authorization) {
@@ -4117,7 +4469,44 @@ async function startServer() {
       twilioSid: process.env.TWILIO_ACCOUNT_SID || "",
       twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || "",
       twilioFromNumber: process.env.TWILIO_FROM_NUMBER || "",
-      commercialFocus: "general"
+      commercialFocus: "general",
+      messagingSettings: {
+        allowedSenders: ["ADMIN", "MANAGER", "ASESOR"],
+        awaitReplyRule: false,
+        allowedChannels: [
+          { from: "ASESOR", to: "ASESOR", enabled: true },
+          { from: "ASESOR", to: "MANAGER", enabled: true },
+          { from: "ASESOR", to: "ADMIN", enabled: true },
+          { from: "MANAGER", to: "MANAGER", enabled: true },
+          { from: "MANAGER", to: "ASESOR", enabled: true },
+          { from: "MANAGER", to: "ADMIN", enabled: true },
+          { from: "ADMIN", to: "ASESOR", enabled: true },
+          { from: "ADMIN", to: "MANAGER", enabled: true },
+          { from: "ADMIN", to: "ADMIN", enabled: true }
+        ]
+      }
+    };
+  }
+
+  if (!db.messages) {
+    db.messages = [];
+  }
+
+  if (db.settings && !db.settings.messagingSettings) {
+    db.settings.messagingSettings = {
+      allowedSenders: ["ADMIN", "MANAGER", "ASESOR"],
+      awaitReplyRule: false,
+      allowedChannels: [
+        { from: "ASESOR", to: "ASESOR", enabled: true },
+        { from: "ASESOR", to: "MANAGER", enabled: true },
+        { from: "ASESOR", to: "ADMIN", enabled: true },
+        { from: "MANAGER", to: "MANAGER", enabled: true },
+        { from: "MANAGER", to: "ASESOR", enabled: true },
+        { from: "MANAGER", to: "ADMIN", enabled: true },
+        { from: "ADMIN", to: "ASESOR", enabled: true },
+        { from: "ADMIN", to: "MANAGER", enabled: true },
+        { from: "ADMIN", to: "ADMIN", enabled: true }
+      ]
     };
   }
 

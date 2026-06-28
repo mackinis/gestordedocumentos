@@ -220,8 +220,47 @@ export interface Notification {
   message: string;
   type: "INFO" | "SUCCESS" | "WARNING" | "DANGER";
   read: boolean;
+  archived?: boolean;
   createdAt: string;
   caseId?: string;
+}
+
+export interface Attachment {
+  name: string;
+  fileUrl: string; // Base64 or standard URL
+  fileType?: string;
+}
+
+export interface Message {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: string;
+  recipientId: string;
+  recipientName: string;
+  recipientRole: string;
+  subject: string;
+  body: string;
+  attachments?: Attachment[];
+  createdAt: string;
+  read: boolean;
+  senderTrash?: boolean;
+  recipientTrash?: boolean;
+  senderDeleted?: boolean;
+  recipientDeleted?: boolean;
+  parentMessageId?: string;
+}
+
+export interface MessagingChannel {
+  from: UserRole;
+  to: UserRole;
+  enabled: boolean;
+}
+
+export interface MessagingSettings {
+  allowedSenders: UserRole[];
+  awaitReplyRule: boolean;
+  allowedChannels: MessagingChannel[];
 }
 
 export interface AuditLog {

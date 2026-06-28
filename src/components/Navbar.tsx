@@ -50,7 +50,7 @@ export default function Navbar({
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showMobileDropdown, setShowMobileDropdown] = useState(false);
 
-  const unreadNotifs = notifications.filter(n => !n.read);
+  const unreadNotifs = notifications.filter(n => !n.read && !n.archived);
   const translations = getTranslations(commercialFocus);
 
   const brandName = {
@@ -250,84 +250,22 @@ export default function Navbar({
           {/* ========================================================= */}
           <div className="hidden md:flex items-center gap-3">
             
-            {/* A. Notifications Bell with standard hover menu */}
-            <div className="relative">
-              <button
-                id="notifications-bell"
-                onClick={() => {
-                  setShowNotifMenu(!showNotifMenu);
-                  setShowMobileDropdown(false);
-                }}
-                className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <Bell className="h-4.5 w-4.5 text-slate-600" />
-                {unreadNotifs.length > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-white animate-pulse">
-                    {unreadNotifs.length}
-                  </span>
-                )}
-              </button>
-
-              {showNotifMenu && (
-                <div className="absolute right-0 mt-2 w-96 origin-top-right rounded-2xl border border-slate-150 bg-white p-1.5 shadow-xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 z-50">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 mb-1">
-                    <h3 className="text-xs font-semibold text-slate-800">
-                      Notificaciones en Tiempo Real
-                    </h3>
-                    {unreadNotifs.length > 0 && (
-                      <button
-                        onClick={() => onMarkAllRead()}
-                        className="text-[11px] font-medium text-slate-500 hover:text-slate-900 cursor-pointer"
-                      >
-                        Marcar todo leído
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="max-h-80 overflow-y-auto space-y-1 p-1">
-                    {notifications.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 text-center px-4">
-                        <Inbox className="h-6 w-6 text-slate-300 stroke-1" />
-                        <p className="text-xs text-slate-400 mt-2">Buzón vacío. No hay alertas recientes.</p>
-                      </div>
-                    ) : (
-                      notifications.map((n) => (
-                        <div
-                          key={n.id}
-                          onClick={() => {
-                            onMarkRead(n.id);
-                            if (n.caseId) {
-                              onChangeTab("cases");
-                            }
-                          }}
-                          className={`flex gap-3 rounded-lg p-2.5 text-xs transition-colors hover:bg-slate-50 cursor-pointer relative ${
-                            !n.read ? "bg-slate-50 font-medium" : ""
-                          }`}
-                        >
-                          <div className="mt-0.5">
-                            <span className={`inline-block h-2.5 w-2.5 rounded-full ${
-                              n.type === "DANGER" ? "bg-red-500" :
-                              n.type === "WARNING" ? "bg-amber-400" :
-                              n.type === "SUCCESS" ? "bg-green-500" : "bg-blue-500"
-                            }`} />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-slate-800 font-semibold">{n.title}</p>
-                            <p className="text-slate-500 text-[11px] mt-0.5 leading-snug">{n.message}</p>
-                            <p className="text-[9px] text-slate-400 mt-1 uppercase font-mono">
-                              {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          </div>
-                          {!n.read && (
-                            <span className="absolute right-2 top-3 h-1.5 w-1.5 rounded-full bg-blue-600" />
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+            {/* A. Notifications Bell (Redirects directly to Notifications tab) */}
+            <button
+              id="notifications-bell"
+              onClick={() => {
+                onChangeTab("notifications");
+              }}
+              className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer"
+              title="Ver Notificaciones"
+            >
+              <Bell className="h-4.5 w-4.5 text-slate-600" />
+              {unreadNotifs.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-white animate-pulse">
+                  {unreadNotifs.length}
+                </span>
               )}
-            </div>
+            </button>
 
             {/* B. Profile Button (Photo & Names) to trigger profile popup form modal */}
             <button

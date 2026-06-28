@@ -31,7 +31,9 @@ import {
   ShieldCheck,
   ClipboardList,
   Settings,
-  FileText
+  FileText,
+  Mail,
+  Bell
 } from "lucide-react";
 import Navbar from "./components/Navbar";
 import ManagerDashboard from "./components/ManagerDashboard";
@@ -39,6 +41,8 @@ import AdvisorDashboard from "./components/AdvisorDashboard";
 import CaseDetails from "./components/CaseDetails";
 import ProfileModal from "./components/ProfileModal";
 import CustomTabContent from "./components/CustomTabContent";
+import MessagesView from "./components/MessagesView";
+import NotificationsView from "./components/NotificationsView";
 import { getTranslations, getText } from "./utils/commercialTranslations";
 import { User, Case, ProcessTemplate, Notification, AuditLog, CaseRequest } from "./types";
 
@@ -64,6 +68,7 @@ export default function App() {
   const [templates, setTemplates] = useState<ProcessTemplate[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [customTabs, setCustomTabs] = useState<any[]>([]);
   const [caseRequests, setCaseRequests] = useState<CaseRequest[]>([]);
@@ -198,6 +203,12 @@ export default function App() {
       const notifRes = await fetch("/api/notifications", { headers: headersJSON });
       const notifData = await notifRes.json();
       setNotifications(notifData);
+
+      const msgRes = await fetch("/api/messages?box=inbox", { headers: headersJSON });
+      if (msgRes.ok) {
+        const msgData = await msgRes.json();
+        setMessages(msgData);
+      }
 
       const customTabsRes = await fetch("/api/custom-tabs", { headers: headersJSON });
       if (customTabsRes.ok) {
@@ -963,7 +974,7 @@ export default function App() {
               </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-display font-light tracking-tight mt-6 text-white leading-tight">
-              {getText("login.subtitle", "Plataforma de Expedientes y Procesos")}
+              {getText("login.subtitle", "Plataforma de Expedientes, Documentos y Procesos")}
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-sm mt-3">
               {getText("login.welcome", "Inicie sesión o regístrese como Asesor de legajos para coordinar y verificar requisitos de forma fluida.")}
@@ -977,9 +988,9 @@ export default function App() {
           <div className="w-full max-w-md bg-white border border-slate-200 p-8 rounded-2xl shadow-xl space-y-6">
             
             {/* Header / Brand info */}
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded">
-                Acceso Verificado
+            <div className="flex flex-col items-center text-center justify-center">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded inline-block">
+                Se Requiere Acceso Verificado
               </span>
               <h2 className="text-xl font-display font-semibold text-slate-950 mt-3">
                 {authMode === "login" 
@@ -1230,31 +1241,102 @@ export default function App() {
     );
   }
 
-  const renderSidebarContent = () => (
-    <div className={`flex-1 overflow-y-auto p-4 ${sidebarCollapsed ? "space-y-4 px-2" : "space-y-2"}`}>
-      {!sidebarCollapsed && (
-        <div className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider px-3 mb-2">
-          Navegación
-        </div>
-      )}
+  const renderSidebarContent = () => {
+    const unreadMessagesCount = messages.filter(m => !m.read && m.recipientId === currentUser?.id && !m.recipientTrash && !m.recipientDeleted).length;
+    
+    const visibleNotifs = notifications.filter(n => {
+      if (n.archived) return false;
+      if (currentUser?.role === "ADMIN") return true;
+      if (currentUser?.role === "MANAGER") {
+        if (n.userId === currentUser.id) return true;
+        const targetUser = availableUsers.find((u) => u.id === n.userId);
+        return targetUser && targetUser.role === "ASESOR";
+      }
+      return n.userId === currentUser?.id;
+    });
+    const unreadNotifsCount = visibleNotifs.filter(n => !n.read).length;
 
-      {/* 1. Expedientes Generales */}
-      <button
-        onClick={() => {
-          setActiveTab("cases");
-          setActiveCaseId(null);
-          setMobileSidebarOpen(false);
-        }}
-        className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-4"} rounded-xl py-3 text-xs font-bold transition-all cursor-pointer ${
-          activeTab === "cases"
-            ? "bg-slate-950 text-white shadow-md shadow-slate-950/10"
-            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-        }`}
-        title={sidebarCollapsed ? "Expedientes Generales" : undefined}
-      >
-        <FolderOpen className="h-4.5 w-4.5 shrink-0" />
-        {!sidebarCollapsed && <span>Expedientes Generales</span>}
-      </button>
+    return (
+      <div className={`flex-1 overflow-y-auto p-4 ${sidebarCollapsed ? "space-y-4 px-2" : "space-y-2"}`}>
+        {!sidebarCollapsed && (
+          <div className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider px-3 mb-2">
+            Navegación
+          </div>
+        )}
+
+        {/* 1. Expedientes Generales */}
+        <button
+          onClick={() => {
+            setActiveTab("cases");
+            setActiveCaseId(null);
+            setMobileSidebarOpen(false);
+          }}
+          className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-4"} rounded-xl py-3 text-xs font-bold transition-all cursor-pointer ${
+            activeTab === "cases"
+              ? "bg-slate-950 text-white shadow-md shadow-slate-950/10"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          }`}
+          title={sidebarCollapsed ? "Expedientes Generales" : undefined}
+        >
+          <FolderOpen className="h-4.5 w-4.5 shrink-0" />
+          {!sidebarCollapsed && <span>Expedientes Generales</span>}
+        </button>
+
+        {/* Mensajes */}
+        <button
+          onClick={() => {
+            setActiveTab("messages");
+            setActiveCaseId(null);
+            setMobileSidebarOpen(false);
+          }}
+          className={`w-full flex items-center justify-between ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-4"} rounded-xl py-3 text-xs font-bold transition-all cursor-pointer relative ${
+            activeTab === "messages"
+              ? "bg-slate-950 text-white shadow-md shadow-slate-950/10"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          }`}
+          title={sidebarCollapsed ? "Mensajes" : undefined}
+        >
+          <div className="flex items-center gap-3">
+            <Mail className="h-4.5 w-4.5 shrink-0" />
+            {!sidebarCollapsed && <span>Mensajes</span>}
+          </div>
+          {!sidebarCollapsed && unreadMessagesCount > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white leading-none">
+              {unreadMessagesCount}
+            </span>
+          )}
+          {sidebarCollapsed && unreadMessagesCount > 0 && (
+            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          )}
+        </button>
+
+        {/* Notificaciones */}
+        <button
+          onClick={() => {
+            setActiveTab("notifications");
+            setActiveCaseId(null);
+            setMobileSidebarOpen(false);
+          }}
+          className={`w-full flex items-center justify-between ${sidebarCollapsed ? "justify-center px-0" : "gap-3 px-4"} rounded-xl py-3 text-xs font-bold transition-all cursor-pointer relative ${
+            activeTab === "notifications"
+              ? "bg-slate-950 text-white shadow-md shadow-slate-950/10"
+              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          }`}
+          title={sidebarCollapsed ? "Notificaciones" : undefined}
+        >
+          <div className="flex items-center gap-3">
+            <Bell className="h-4.5 w-4.5 shrink-0" />
+            {!sidebarCollapsed && <span>Notificaciones</span>}
+          </div>
+          {!sidebarCollapsed && unreadNotifsCount > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white leading-none">
+              {unreadNotifsCount}
+            </span>
+          )}
+          {sidebarCollapsed && unreadNotifsCount > 0 && (
+            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          )}
+        </button>
 
       {/* 2. Plantillas de Proceso */}
       {currentUser.role !== "ASESOR" && (
@@ -1416,7 +1498,8 @@ export default function App() {
         </>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col">
@@ -1532,7 +1615,19 @@ export default function App() {
             onRejectAdjustmentRequest={handleRejectAdjustmentRequest}
           />
         ) : (
-          activeTab.startsWith("custom_tab_") ? (
+          activeTab === "messages" ? (
+            <MessagesView
+              currentUser={currentUser}
+              availableUsers={availableUsers}
+              onRefreshGlobalData={syncData}
+            />
+          ) : activeTab === "notifications" ? (
+            <NotificationsView
+              currentUser={currentUser}
+              notifications={notifications}
+              onRefreshNotifications={syncData}
+            />
+          ) : activeTab.startsWith("custom_tab_") ? (
             (() => {
               const tabId = activeTab.replace("custom_tab_", "");
               const currentTab = customTabs.find((t) => t.id === tabId);
