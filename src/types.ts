@@ -120,6 +120,9 @@ export interface Case {
   managerId: string; // User ID (MANAGER)
   stages?: Stage[];
   stagesDetermined?: boolean;
+  reviewStatus?: "REVISION_SOLICITADA" | "APROBACION_SOLICITADA" | "REVISADO" | "APROBADO" | null;
+  reviewButtonBlocked?: boolean;
+  reviewButtonBlockedReason?: string;
   partyCounts?: {
     compradores: number;
     vendedores: number;

@@ -619,12 +619,12 @@ export default function App() {
   };
 
   // Create Manual Observation
-  const handleAddObservation = async (caseId: string, message: string, entityType: string, entityId: string) => {
+  const handleAddObservation = async (caseId: string, message: string, entityType: string, entityId: string, bloquearRevision?: boolean) => {
     try {
       const response = await fetch(`/api/cases/${caseId}/observations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, entityType, entityId, userId: currentUser?.id })
+        body: JSON.stringify({ message, entityType, entityId, userId: currentUser?.id, bloquearRevision })
       });
       if (response.ok) {
         await syncData();
@@ -680,6 +680,76 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error retroceding stage:", err);
+    }
+  };
+
+  const handleRequestReview = async (caseId: string, type: "REVISION_SOLA" | "REVISION_Y_APROBACION") => {
+    try {
+      const response = await fetch(`/api/cases/${caseId}/request-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, userId: currentUser?.id })
+      });
+      if (response.ok) {
+        await syncData();
+        return { success: true };
+      } else {
+        const data = await response.json();
+        return { error: true, message: data.message };
+      }
+    } catch (err) {
+      console.error("Error requesting review:", err);
+      return { error: true, message: "Error en la conexión de red." };
+    }
+  };
+
+  const handleCancelReview = async (caseId: string) => {
+    try {
+      const response = await fetch(`/api/cases/${caseId}/cancel-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: currentUser?.id })
+      });
+      if (response.ok) {
+        await syncData();
+        return { success: true };
+      } else {
+        const data = await response.json();
+        return { error: true, message: data.message };
+      }
+    } catch (err) {
+      console.error("Error canceling review request:", err);
+      return { error: true, message: "Error en la conexión de red." };
+    }
+  };
+
+  const handleToggleReviewBlock = async (caseId: string, blocked: boolean, reason?: string) => {
+    try {
+      const response = await fetch(`/api/cases/${caseId}/toggle-review-block`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blocked, reason, userId: currentUser?.id })
+      });
+      if (response.ok) {
+        await syncData();
+      }
+    } catch (err) {
+      console.error("Error toggling review block:", err);
+    }
+  };
+
+  const handleResolveReview = async (caseId: string, action: "APROBAR" | "RECHAZAR") => {
+    try {
+      const response = await fetch(`/api/cases/${caseId}/resolve-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, userId: currentUser?.id })
+      });
+      if (response.ok) {
+        await syncData();
+      }
+    } catch (err) {
+      console.error("Error resolving review:", err);
     }
   };
 
@@ -1613,6 +1683,10 @@ export default function App() {
             onAddAdjustmentRequest={handleAddAdjustmentRequest}
             onApproveAdjustmentRequest={handleApproveAdjustmentRequest}
             onRejectAdjustmentRequest={handleRejectAdjustmentRequest}
+            onRequestReview={handleRequestReview}
+            onCancelReview={handleCancelReview}
+            onToggleReviewBlock={handleToggleReviewBlock}
+            onResolveReview={handleResolveReview}
           />
         ) : (
           activeTab === "messages" ? (

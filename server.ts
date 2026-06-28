@@ -3490,7 +3490,7 @@ app.post("/api/cases/:id/observations/:obsId/resolve", (req, res) => {
 // Post Custom Observation (Manager)
 app.post("/api/cases/:id/observations", (req, res) => {
   const { id } = req.params;
-  const { message, entityType, entityId, userId } = req.body;
+  const { message, entityType, entityId, userId, bloquearRevision } = req.body;
 
   const accessCheck = checkAndAssignManager(id, userId);
   if (!accessCheck.allowed) {
@@ -3517,6 +3517,10 @@ app.post("/api/cases/:id/observations", (req, res) => {
 
   if (caseObj) {
     caseObj.status = "OBSERVADO";
+    if (bloquearRevision === true) {
+      caseObj.reviewButtonBlocked = true;
+      caseObj.reviewButtonBlockedReason = message || "Observaciones pendientes en la etapa actual.";
+    }
   }
 
   saveDb();
@@ -3526,7 +3530,7 @@ app.post("/api/cases/:id/observations", (req, res) => {
     createNotification(
       caseObj.advisorId,
       "Nueva Observación Registrada",
-      `Nueva indicación de Martina Sola: ${message}`,
+      `Nueva indicación de Martina Sola: ${message}` + (bloquearRevision ? " (Botón de revisión bloqueado)" : ""),
       "WARNING",
       id
     );
@@ -3534,6 +3538,226 @@ app.post("/api/cases/:id/observations", (req, res) => {
 
   logAudit(userId || "usr-manager", "OBSERVATION_CREATED", "OBSERVATION", obs.id, `Observación agregada manualmente: ${message}`);
   res.json(obs);
+});
+
+// Request Stage Review or Approval (Advisor)
+app.post("/api/cases/:id/request-review", (req, res) => {
+  const { id } = req.params;
+  const { type, userId } = req.body; // type: "REVISION_SOLA" or "REVISION_Y_APROBACION"
+
+  const caseObj = db.cases.find((c) => c.id === id);
+  if (!caseObj) {
+    return res.status(404).json({ message: "Expediente no encontrado." });
+  }
+
+  if (caseObj.reviewButtonBlocked) {
+    return res.status(400).json({ 
+      error: true, 
+      message: "Las solicitudes de revisión están bloqueadas temporalmente para este expediente por observaciones pendientes de cumplir." 
+    });
+  }
+
+  const user = db.users.find(u => u.id === userId) || { name: "Asesor" };
+  caseObj.reviewStatus = type === "REVISION_SOLA" ? "REVISION_SOLICITADA" : "APROBACION_SOLICITADA";
+  caseObj.updatedAt = new Date().toISOString();
+
+  saveDb();
+
+  // Notify Manager
+  createNotification(
+    caseObj.managerId,
+    "Solicitud de Revisión de Etapa",
+    `El asesor ${user.name} ha solicitado la ${type === "REVISION_SOLA" ? "revisión" : "revisión y aprobación"} de la etapa actual en el expediente ${caseObj.code}.`,
+    "INFO",
+    id
+  );
+
+  logAudit(userId || "usr-asesor1", "REVIEW_REQUESTED", "CASE", id, `Solicitó revisión de etapa: ${type}`);
+  res.json({ success: true, case: caseObj });
+});
+
+// Cancel Stage Review or Approval Request (Advisor)
+app.post("/api/cases/:id/cancel-review", (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.body;
+
+  const caseObj = db.cases.find((c) => c.id === id);
+  if (!caseObj) {
+    return res.status(404).json({ message: "Expediente no encontrado." });
+  }
+
+  const prevStatus = caseObj.reviewStatus;
+  caseObj.reviewStatus = null;
+  caseObj.updatedAt = new Date().toISOString();
+
+  saveDb();
+
+  const user = db.users.find(u => u.id === userId) || { name: "Asesor" };
+
+  // Notify Manager
+  createNotification(
+    caseObj.managerId,
+    "Solicitud de Revisión Cancelada",
+    `El asesor ${user.name} ha cancelado la solicitud de revisión activa en el expediente ${caseObj.code}.`,
+    "INFO",
+    id
+  );
+
+  logAudit(userId || "usr-asesor1", "REVIEW_CANCELED", "CASE", id, `Canceló la solicitud de revisión (Estado previo: ${prevStatus})`);
+  res.json({ success: true, case: caseObj });
+});
+
+// Toggle Advisor Review Block (Manager/Admin)
+app.post("/api/cases/:id/toggle-review-block", (req, res) => {
+  const { id } = req.params;
+  const { blocked, reason, userId } = req.body;
+
+  const caseObj = db.cases.find((c) => c.id === id);
+  if (!caseObj) {
+    return res.status(404).json({ message: "Expediente no encontrado." });
+  }
+
+  caseObj.reviewButtonBlocked = !!blocked;
+  if (blocked) {
+    caseObj.reviewButtonBlockedReason = reason || "Observaciones pendientes en la etapa actual.";
+    // Reset review requests when blocked
+    caseObj.reviewStatus = null;
+  } else {
+    delete caseObj.reviewButtonBlockedReason;
+  }
+  caseObj.updatedAt = new Date().toISOString();
+
+  saveDb();
+
+  // Notify Advisor
+  createNotification(
+    caseObj.advisorId,
+    blocked ? "Solicitudes de Revisión Bloqueadas" : "Solicitudes de Revisión Habilitadas",
+    blocked 
+      ? `El manager/director ha bloqueado tus solicitudes de revisión en el expediente ${caseObj.code}. Motivo: ${reason || "Cumplir con las observaciones."}`
+      : `El manager/director ha habilitado tus solicitudes de revisión en el expediente ${caseObj.code}.`,
+    blocked ? "DANGER" : "SUCCESS",
+    id
+  );
+
+  logAudit(userId || "usr-manager", blocked ? "REVIEW_BLOCKED" : "REVIEW_UNBLOCKED", "CASE", id, blocked ? `Bloqueó botón de revisión. Motivo: ${reason}` : "Desbloqueó botón de revisión");
+  res.json({ success: true, case: caseObj });
+});
+
+// Resolve Stage Review/Approval (Manager/Admin)
+app.post("/api/cases/:id/resolve-review", (req, res) => {
+  const { id } = req.params;
+  const { action, userId } = req.body; // action: "APROBAR" or "RECHAZAR"
+
+  const caseObj = db.cases.find((c) => c.id === id);
+  if (!caseObj) {
+    return res.status(404).json({ message: "Expediente no encontrado." });
+  }
+
+  const prevStatus = caseObj.reviewStatus;
+
+  if (action === "APROBAR") {
+    caseObj.reviewButtonBlocked = false; // automatically unblock on approval
+    
+    // If it was "APROBACION_SOLICITADA", we automatically advance stage!
+    if (prevStatus === "APROBACION_SOLICITADA") {
+      caseObj.reviewStatus = "APROBADO";
+      saveDb();
+      
+      // We will perform stage advance!
+      const hydrated = getHydratedCase(id);
+      if (hydrated && hydrated.currentStage) {
+        const { currentStage } = hydrated;
+        const stagesOrdered = hydrated.stages.sort((a: any, b: any) => a.order - b.order);
+        const currentIdx = stagesOrdered.findIndex((s: any) => s.id === currentStage.id);
+
+        if (currentIdx === stagesOrdered.length - 1) {
+          caseObj.status = "FINALIZADO";
+          caseObj.updatedAt = new Date().toISOString();
+          saveDb();
+          logAudit(userId || "usr-manager", "CASE_FINISHED", "CASE", id, `Expediente finalizado con aprobación de etapa: ${caseObj.code}`);
+          return res.json({ success: true, finished: true, case: caseObj });
+        } else {
+          const nextStage = stagesOrdered[currentIdx + 1];
+          caseObj.currentStageId = nextStage.id;
+          caseObj.status = "ACTIVO";
+          caseObj.reviewStatus = null; // reset review status on next stage
+          caseObj.updatedAt = new Date().toISOString();
+
+          // Provision requirements for new stage
+          nextStage.requirements.forEach((req: any) => {
+            if (req.type === "TASK" && !db.tasks.find(t => t.caseId === id && t.requirementId === req.id)) {
+              db.tasks.push({
+                id: `tsk-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                caseId: id,
+                requirementId: req.id,
+                name: req.name,
+                description: req.description,
+                status: "PENDIENTE",
+              });
+            } else if (req.type === "FORM" && !db.tasks.find(t => t.caseId === id && t.requirementId === req.id)) {
+              const formTask = {
+                id: `tsk-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                caseId: id,
+                requirementId: req.id,
+                name: req.name,
+                status: "PENDIENTE",
+                formInstances: [],
+                formValues: {},
+              };
+              syncTaskFormInstances(caseObj, formTask);
+              db.tasks.push(formTask);
+            }
+          });
+
+          saveDb();
+
+          createNotification(
+            caseObj.advisorId,
+            "Expediente Aprobado y Avanzado de Etapa",
+            `El manager aprobó la etapa actual. El expediente ${caseObj.code} avanzó a la etapa: '${nextStage.name}' de forma automática.`,
+            "SUCCESS",
+            id
+          );
+          logAudit(userId || "usr-manager", "STAGE_CHANGED_AUTOMATIC", "CASE", id, `Aprobó revisión y avanzó automáticamente a etapa '${nextStage.name}'`);
+          return res.json({ success: true, advanced: true, case: caseObj });
+        }
+      }
+    } else {
+      // Just REVISION_SOLICITADA approved, mark as REVISADO, do not auto-advance
+      caseObj.reviewStatus = "REVISADO";
+      caseObj.updatedAt = new Date().toISOString();
+      saveDb();
+
+      createNotification(
+        caseObj.advisorId,
+        "Revisión de Etapa Aprobada",
+        `El manager aprobó la revisión de la etapa actual en el expediente ${caseObj.code}.`,
+        "SUCCESS",
+        id
+      );
+      logAudit(userId || "usr-manager", "REVIEW_APPROVED", "CASE", id, `Aprobó revisión de la etapa actual (sin avance automático).`);
+    }
+  } else {
+    // RECHAZAR (reject/send observations)
+    caseObj.reviewStatus = null;
+    caseObj.status = "OBSERVADO";
+    caseObj.reviewButtonBlocked = true; // Auto-block on rejection until corrected
+    caseObj.reviewButtonBlockedReason = "Revisión rechazada por observaciones pendientes.";
+    caseObj.updatedAt = new Date().toISOString();
+    saveDb();
+
+    createNotification(
+      caseObj.advisorId,
+      "Revisión de Etapa Rechazada / Observada",
+      `Se ha rechazado la revisión de la etapa en el expediente ${caseObj.code}. El botón de revisión ha sido bloqueado hasta que corrijas las observaciones.`,
+      "DANGER",
+      id
+    );
+    logAudit(userId || "usr-manager", "REVIEW_REJECTED", "CASE", id, `Rechazó revisión de etapa y bloqueó botón de revisión.`);
+  }
+
+  res.json({ success: true, case: caseObj });
 });
 
 // Stage Control: Advanced Transition Validation

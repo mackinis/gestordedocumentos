@@ -47,7 +47,7 @@ interface CaseDetailsProps {
   onRejectDocument: (caseId: string, reqId: string, reason: string) => void;
   onCompleteForm: (caseId: string, reqId: string, values: any) => void;
   onToggleTask: (caseId: string, reqId: string, status: "PENDIENTE" | "COMPLETA") => void;
-  onAddObservation: (caseId: string, message: string, entityType: string, entityId: string) => void;
+  onAddObservation: (caseId: string, message: string, entityType: string, entityId: string, bloquearRevision?: boolean) => void;
   onResolveObservation: (caseId: string, obsId: string, response: string) => void;
   onAdvanceStage: (caseId: string) => Promise<any>;
   onRetrocedeStage: (caseId: string) => void;
@@ -60,6 +60,10 @@ interface CaseDetailsProps {
   onAddAdjustmentRequest?: (caseId: string, payload: any) => void;
   onApproveAdjustmentRequest?: (caseId: string, reqId: string) => void;
   onRejectAdjustmentRequest?: (caseId: string, reqId: string, rejectionReason: string) => void;
+  onRequestReview?: (caseId: string, type: "REVISION_SOLA" | "REVISION_Y_APROBACION") => Promise<{ success?: boolean; error?: boolean; message?: string }>;
+  onCancelReview?: (caseId: string) => Promise<{ success?: boolean; error?: boolean; message?: string }>;
+  onToggleReviewBlock?: (caseId: string, blocked: boolean, reason?: string) => Promise<void>;
+  onResolveReview?: (caseId: string, action: "APROBAR" | "RECHAZAR") => Promise<void>;
 }
 
 export default function CaseDetails({
@@ -87,7 +91,11 @@ export default function CaseDetails({
   onConfigureUploadPermission,
   onAddAdjustmentRequest,
   onApproveAdjustmentRequest,
-  onRejectAdjustmentRequest
+  onRejectAdjustmentRequest,
+  onRequestReview,
+  onCancelReview,
+  onToggleReviewBlock,
+  onResolveReview
 }: CaseDetailsProps) {
   
   const translations = getTranslations(commercialFocus);
@@ -139,6 +147,12 @@ export default function CaseDetails({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyData, setHistoryData] = useState<any>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Stage review / block states
+  const [showReviewRequestModal, setShowReviewRequestModal] = useState(false);
+  const [isRequestingReview, setIsRequestingReview] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [bloquearRevision, setBloquearRevision] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState("");
 
   // Stage management states
@@ -490,7 +504,10 @@ export default function CaseDetails({
     advisorId,
     managerId,
     createdAt,
-    partyCounts
+    partyCounts,
+    reviewStatus,
+    reviewButtonBlocked,
+    reviewButtonBlockedReason
   } = caseDetails;
 
   const fetchHistory = async () => {
@@ -689,8 +706,9 @@ export default function CaseDetails({
   const handleAddGeneralObs = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGeneralObs) return;
-    onAddObservation(id, newGeneralObs, "GENERAL", "general");
+    onAddObservation(id, newGeneralObs, "GENERAL", "general", bloquearRevision);
     setNewGeneralObs("");
+    setBloquearRevision(false);
   };
 
   const handleResolveObsSubmit = (obsId: string) => {
@@ -698,6 +716,60 @@ export default function CaseDetails({
     onResolveObservation(id, obsId, replyText);
     setReplyObsId(null);
     setReplyText("");
+  };
+
+  const handleRequestReviewSubmit = async (type: "REVISION_SOLA" | "REVISION_Y_APROBACION") => {
+    if (!onRequestReview) return;
+    setIsRequestingReview(true);
+    setReviewError(null);
+    try {
+      const res = await onRequestReview(id, type);
+      if (res && res.error) {
+        setReviewError(res.message || "Error al solicitar la revisión.");
+      } else {
+        setShowReviewRequestModal(false);
+      }
+    } catch (err: any) {
+      setReviewError("Error en la conexión con el servidor.");
+    } finally {
+      setIsRequestingReview(false);
+    }
+  };
+
+  const handleCancelReviewSubmit = async () => {
+    if (!onCancelReview) return;
+    setIsRequestingReview(true);
+    setReviewError(null);
+    try {
+      const res = await onCancelReview(id);
+      if (res && res.error) {
+        setReviewError(res.message || "Error al cancelar la revisión.");
+      } else {
+        setShowReviewRequestModal(false);
+      }
+    } catch (err: any) {
+      setReviewError("Error en la conexión con el servidor.");
+    } finally {
+      setIsRequestingReview(false);
+    }
+  };
+
+  const handleToggleBlockSubmit = async (blocked: boolean, reason?: string) => {
+    if (!onToggleReviewBlock) return;
+    try {
+      await onToggleReviewBlock(id, blocked, reason);
+    } catch (err) {
+      console.error("Error toggling review block", err);
+    }
+  };
+
+  const handleResolveReviewSubmit = async (action: "APROBAR" | "RECHAZAR") => {
+    if (!onResolveReview) return;
+    try {
+      await onResolveReview(id, action);
+    } catch (err) {
+      console.error("Error resolving review", err);
+    }
   };
 
   const handleAdvanceClick = async () => {
@@ -820,6 +892,29 @@ export default function CaseDetails({
             </button>
           )}
 
+          {currentUser.role === "ASESOR" && status !== "FINALIZADO" && (
+            <button
+              id="btn-request-review"
+              onClick={() => {
+                if (reviewButtonBlocked) {
+                  alert(`Las solicitudes de revisión están bloqueadas temporalmente.\nMotivo: ${reviewButtonBlockedReason || "Por favor cumple con todas las observaciones pendientes antes de solicitar nueva revisión."}`);
+                  return;
+                }
+                setReviewError(null);
+                setShowReviewRequestModal(true);
+              }}
+              disabled={!!reviewButtonBlocked}
+              className={`px-4 py-2 font-bold text-xs rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${
+                reviewButtonBlocked 
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+              }`}
+              title={reviewButtonBlocked ? `Bloqueado: ${reviewButtonBlockedReason}` : "Solicitar revisión o aprobación al manager"}
+            >
+              <span>Solicitar Revisión ⏳</span>
+            </button>
+          )}
+
           {status !== "FINALIZADO" && (currentUser.role === "ASESOR" || canIntervene) && (
             <button
               id="btn-advance-stage"
@@ -840,6 +935,92 @@ export default function CaseDetails({
         <p className="text-xs text-slate-500 leading-relaxed max-w-3xl -mt-2">
           {description}
         </p>
+      )}
+
+      {/* SECCIÓN DE REVISIONES Y CONTROL (Asesores & Managers) */}
+      {(reviewStatus || reviewButtonBlocked) && (
+        <div className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+          reviewStatus === "REVISION_SOLICITADA" || reviewStatus === "APROBACION_SOLICITADA"
+            ? "bg-violet-50 border-violet-200"
+            : reviewButtonBlocked
+            ? "bg-rose-50 border-rose-250"
+            : "bg-emerald-50 border-emerald-250"
+        }`}>
+          <div className="flex items-start gap-3">
+            <span className="text-xl mt-0.5">
+              {reviewStatus === "REVISION_SOLICITADA" || reviewStatus === "APROBACION_SOLICITADA" ? "⏳" : reviewButtonBlocked ? "🚫" : "✅"}
+            </span>
+            <div>
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-mono">
+                Control de Revisión de Etapa
+              </h4>
+              <p className="text-xs text-slate-700 mt-1">
+                {reviewStatus === "REVISION_SOLICITADA" && (
+                  <span>El asesor solicitó <strong>Revisión Simple</strong> para la etapa actual.</span>
+                )}
+                {reviewStatus === "APROBACION_SOLICITADA" && (
+                  <span>El asesor solicitó <strong>Revisión con Aprobación Automática</strong> de la etapa. Al aprobar, el expediente avanzará automáticamente.</span>
+                )}
+                {reviewStatus === "REVISADO" && (
+                  <span>La etapa actual ha sido <strong>Revisada</strong> con éxito (pendiente avance manual).</span>
+                )}
+                {reviewStatus === "APROBADO" && (
+                  <span>La etapa actual ha sido <strong>Aprobada</strong>.</span>
+                )}
+                {!reviewStatus && reviewButtonBlocked && (
+                  <span>El botón de revisión para el asesor está <strong>Bloqueado</strong> por observaciones pendientes.</span>
+                )}
+              </p>
+              {reviewButtonBlocked && (
+                <p className="text-[11px] text-rose-800 italic mt-1 bg-white/50 px-2 py-1 rounded-md border border-rose-100">
+                  <strong>Motivo de bloqueo:</strong> {reviewButtonBlockedReason || "Por favor cumpla con todas las observaciones registradas antes de solicitar nueva revisión."}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Acciones para Managers / Admins */}
+          {currentUser.role !== "ASESOR" && (
+            <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
+              {(reviewStatus === "REVISION_SOLICITADA" || reviewStatus === "APROBACION_SOLICITADA") && (
+                <>
+                  <button
+                    onClick={() => handleResolveReviewSubmit("APROBAR")}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 shadow-2xs transition-colors"
+                  >
+                    <span>Aprobar ✓</span>
+                  </button>
+                  <button
+                    onClick={() => handleResolveReviewSubmit("RECHAZAR")}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg cursor-pointer flex items-center gap-1 shadow-2xs transition-colors"
+                  >
+                    <span>Rechazar con Observaciones ✗</span>
+                  </button>
+                </>
+              )}
+              
+              <button
+                onClick={() => {
+                  if (reviewButtonBlocked) {
+                    handleToggleBlockSubmit(false);
+                  } else {
+                    const r = prompt("Ingrese el motivo de bloqueo para el asesor (ej. faltan firmas, documentación errónea):");
+                    if (r !== null) {
+                      handleToggleBlockSubmit(true, r);
+                    }
+                  }
+                }}
+                className={`px-3 py-1.5 border text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+                  reviewButtonBlocked
+                    ? "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
+                    : "bg-rose-100 border-rose-250 text-rose-800 hover:bg-rose-200"
+                }`}
+              >
+                {reviewButtonBlocked ? "🔓 Desbloquear Botón de Revisión" : "🔒 Bloquear Botón de Revisión"}
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Visual Pipeline Stepper */}
@@ -2065,6 +2246,15 @@ export default function CaseDetails({
                     onChange={(e) => setNewGeneralObs(e.target.value)}
                     className="w-full text-xs p-2 border border-slate-250 bg-white text-slate-900 rounded-lg focus:outline-hidden focus:border-slate-800"
                   />
+                  <label className="flex items-center gap-2 cursor-pointer py-1 select-none">
+                    <input
+                      type="checkbox"
+                      checked={bloquearRevision}
+                      onChange={(e) => setBloquearRevision(e.target.checked)}
+                      className="rounded text-rose-600 focus:ring-rose-500 h-3.5 w-3.5 accent-rose-600"
+                    />
+                    <span className="text-[11px] font-bold text-slate-700">🚫 Bloquear solicitudes de revisión al asesor</span>
+                  </label>
                   <button
                     type="submit"
                     className="w-full py-2 bg-slate-950 text-white font-bold text-xs rounded-lg hover:bg-slate-800 cursor-pointer inline-flex items-center justify-center gap-1.5"
@@ -2543,6 +2733,150 @@ export default function CaseDetails({
               </div>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* SOLICITAR REVISIÓN MODAL */}
+      {showReviewRequestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white border text-slate-900 border-slate-200 rounded-2xl p-6 w-full max-w-md shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <button
+              onClick={() => setShowReviewRequestModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer font-bold text-lg p-1"
+            >
+              ✕
+            </button>
+            
+            <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider font-mono">
+              Solicitud de Control de Calidad
+            </p>
+            <h3 className="font-display font-black text-lg text-slate-900 mt-0.5">
+              Solicitar Revisión de Etapa
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">
+              ¿Qué modalidad de revisión desea enviar a su Manager/Director asignado para la etapa actual?
+            </p>
+
+            {reviewError && (
+              <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800">
+                ⚠️ {reviewError}
+              </div>
+            )}
+
+            <div className="mt-6 space-y-4">
+              {/* Opción 1: Solo revisión */}
+              <div
+                className={`p-4 border rounded-xl transition-all ${
+                  reviewStatus === "APROBACION_SOLICITADA"
+                    ? "opacity-40 bg-slate-50 border-slate-200 cursor-not-allowed"
+                    : reviewStatus === "REVISION_SOLICITADA"
+                    ? "border-amber-300 bg-amber-50/20"
+                    : "border-slate-200 hover:border-slate-800 hover:bg-slate-50 cursor-pointer"
+                }`}
+                onClick={() => {
+                  if (reviewStatus !== "REVISION_SOLICITADA" && reviewStatus !== "APROBACION_SOLICITADA" && !isRequestingReview) {
+                    handleRequestReviewSubmit("REVISION_SOLA");
+                  }
+                }}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-xs text-slate-900 font-sans flex items-center gap-1.5">
+                    Solo Revisión Simple 🔍
+                    {reviewStatus === "REVISION_SOLICITADA" && (
+                      <span className="animate-pulse inline-block w-2 h-2 rounded-full bg-amber-500" />
+                    )}
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                    reviewStatus === "REVISION_SOLICITADA"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-slate-100 text-slate-700"
+                  }`}>
+                    {reviewStatus === "REVISION_SOLICITADA" ? "Solicitada" : "Manual"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                  El manager verificará la etapa para encontrar observaciones. No avanzará automáticamente al finalizar; deberás avanzar manualmente cuando esté todo conforme.
+                </p>
+
+                {reviewStatus === "REVISION_SOLICITADA" && (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={isRequestingReview}
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent triggering outer container click
+                        handleCancelReviewSubmit();
+                      }}
+                      className="px-3 py-1 text-[11px] font-bold bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <span>✕ Cancelar Solicitud</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Opción 2: Revisión + Aprobación */}
+              <div
+                className={`p-4 border rounded-xl transition-all ${
+                  reviewStatus === "REVISION_SOLICITADA"
+                    ? "opacity-40 bg-slate-50 border-slate-200 cursor-not-allowed"
+                    : reviewStatus === "APROBACION_SOLICITADA"
+                    ? "border-indigo-300 bg-indigo-50/20"
+                    : "border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50/40 cursor-pointer"
+                }`}
+                onClick={() => {
+                  if (reviewStatus !== "REVISION_SOLICITADA" && reviewStatus !== "APROBACION_SOLICITADA" && !isRequestingReview) {
+                    handleRequestReviewSubmit("REVISION_Y_APROBACION");
+                  }
+                }}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-xs text-indigo-850 font-sans flex items-center gap-1.5">
+                    Revisión y Aprobación Automática ⚡
+                    {reviewStatus === "APROBACION_SOLICITADA" && (
+                      <span className="animate-pulse inline-block w-2 h-2 rounded-full bg-indigo-500" />
+                    )}
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                    reviewStatus === "APROBACION_SOLICITADA"
+                      ? "bg-indigo-100 text-indigo-800"
+                      : "bg-slate-100 text-slate-700"
+                  }`}>
+                    {reviewStatus === "APROBACION_SOLICITADA" ? "Solicitada" : "Automático"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                  Si el manager aprueba, el sistema dará por superada la etapa y avanzará al expediente a la siguiente etapa de forma 100% automática.
+                </p>
+
+                {reviewStatus === "APROBACION_SOLICITADA" && (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={isRequestingReview}
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent triggering outer container click
+                        handleCancelReviewSubmit();
+                      }}
+                      className="px-3 py-1 text-[11px] font-bold bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <span>✕ Cancelar Solicitud</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-2 justify-end">
+              <button
+                onClick={() => setShowReviewRequestModal(false)}
+                disabled={isRequestingReview}
+                className="px-3.5 py-1.5 text-xs font-bold border border-slate-250 hover:bg-slate-100 bg-white text-slate-700 rounded-lg cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
