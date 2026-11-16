@@ -1,3 +1,4 @@
+import { ensureDatabaseReady } from './startup-migrations';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -13,6 +14,17 @@ import { handleQueueBatch } from "./queue";
 import type { Env, HonoVariables, QueueTaskMessage } from "./types";
 
 const app = new Hono<{ Bindings: Env; Variables: HonoVariables }>();
+// Gate every API call until the bundled D1 schema is ready.
+app.use('/api/*', async (c, next) => {
+  try {
+    await ensureDatabaseReady(c.env.DB);
+  } catch (error) {
+    console.error('Automatic D1 initialization failed:', error);
+    return c.json({ message: 'Estamos trabajando en la base de datos. Aguarde.', error: 'database_initializing' }, 503, { 'Retry-After': '5' });
+  }
+  await next();
+});
+
 
 app.onError((err, c) => {
   console.error("[Worker Error]", err);
