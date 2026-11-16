@@ -71,16 +71,14 @@ export default function MessagesView({
   const fetchSettings = async () => {
     try {
       const res = await fetch("/api/admin/messaging-settings", {
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         const data = await res.json();
         setAdminSettings(data);
       } else {
         // Fallback or read from public settings
-        const publicSettingsRes = await fetch("/api/settings/public");
+        const publicSettingsRes = await fetch("/api/settings/public", { credentials: "include" });
         if (publicSettingsRes.ok) {
           const publicData = await publicSettingsRes.json();
           if (publicData.messagingSettings) {
@@ -98,9 +96,7 @@ export default function MessagesView({
     setLoading(true);
     try {
       const res = await fetch(`/api/messages?box=${box}`, {
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         const data = await res.json();
@@ -127,9 +123,7 @@ export default function MessagesView({
     try {
       const res = await fetch(`/api/messages/${msg.id}/read`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         // update locally
@@ -146,9 +140,7 @@ export default function MessagesView({
     try {
       const res = await fetch(`/api/messages/${msgId}/trash`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         setSelectedMessage(null);
@@ -165,9 +157,7 @@ export default function MessagesView({
     try {
       const res = await fetch(`/api/messages/${msgId}/restore`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         setSelectedMessage(null);
@@ -185,9 +175,7 @@ export default function MessagesView({
     try {
       const res = await fetch(`/api/messages/${msgId}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         setSelectedMessage(null);
@@ -236,9 +224,9 @@ export default function MessagesView({
     try {
       const res = await fetch("/api/messages", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           recipientId: composeRecipient,
@@ -284,9 +272,9 @@ export default function MessagesView({
     try {
       const res = await fetch("/api/admin/messaging-settings", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(adminSettings)
       });

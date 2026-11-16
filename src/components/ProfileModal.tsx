@@ -48,7 +48,7 @@ interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: UserType;
-  token: string;
+  token?: string;
   onRefreshUser: () => void;
   commercialFocus?: string;
   onLogout?: () => void;
@@ -58,7 +58,6 @@ export default function ProfileModal({
   isOpen,
   onClose,
   currentUser,
-  token,
   onRefreshUser,
   commercialFocus = "general",
   onLogout
@@ -90,7 +89,7 @@ export default function ProfileModal({
     setFetchingRequests(true);
     try {
       const res = await fetch("/api/profile/change-requests", {
-        headers: { "Authorization": `Bearer ${token}` }
+        credentials: "include"
       });
       if (res.ok) {
         const data = await res.json();
@@ -191,9 +190,9 @@ export default function ProfileModal({
     try {
       const res = await fetch("/api/profile/update", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           name,
@@ -250,9 +249,9 @@ export default function ProfileModal({
     try {
       const res = await fetch("/api/profile/change-password", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ newPassword })
       });
@@ -276,9 +275,9 @@ export default function ProfileModal({
     try {
       const res = await fetch(`/api/profile/change-requests/${requestId}/resolve`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ status })
       });

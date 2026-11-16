@@ -28,9 +28,11 @@ import {
   ArrowDown,
   ChevronDown,
   Info,
-  X
+  X,
+  Sparkles,
+  RefreshCw
 } from "lucide-react";
-import { Case, User, Participant, Observation } from "../types";
+import { Case, User, Participant, Observation, DocumentAIAnalysis } from "../types";
 import { getTranslations } from "../utils/commercialTranslations";
 
 interface CaseDetailsProps {
@@ -210,6 +212,13 @@ export default function CaseDetails({
   // Upload request specification states
   const [promptingUploadReqId, setPromptingUploadReqId] = useState<string | null>(null);
   const [uploadRequestReason, setUploadRequestReason] = useState("");
+
+  // Cloudflare Workers AI Document Analysis & Form Assist states
+  const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
+  const [analyzedDocMap, setAnalyzedDocMap] = useState<Record<string, DocumentAIAnalysis>>({});
+  const [docAiError, setDocAiError] = useState<Record<string, string>>({});
+  const [assistingFormKey, setAssistingFormKey] = useState<string | null>(null);
+  const [formAssistError, setFormAssistError] = useState<Record<string, string>>({});
 
   const getAdaptedFieldLabel = (label: string, role?: string) => {
     if (!label) return "";
@@ -513,7 +522,9 @@ export default function CaseDetails({
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const response = await fetch(`/api/cases/${id}/timeline-history`);
+      const response = await fetch(`/api/cases/${id}/timeline-history`, {
+        credentials: "include"
+      });
       if (response.ok) {
         const data = await response.json();
         setHistoryData(data);
@@ -522,6 +533,75 @@ export default function CaseDetails({
       console.error("Error fetching case timeline history:", err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleAnalyzeDocumentAI = async (docId: string) => {
+    setAnalyzingDocId(docId);
+    setDocAiError((prev) => ({ ...prev, [docId]: "" }));
+    try {
+      const res = await fetch(`/api/cases/${id}/documents/${docId}/analyze-ai`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (res.ok && data.analysis) {
+        setAnalyzedDocMap((prev) => ({ ...prev, [docId]: data.analysis }));
+      } else {
+        setDocAiError((prev) => ({
+          ...prev,
+          [docId]: data.message || "No se pudo completar el análisis con Cloudflare Workers AI."
+        }));
+      }
+    } catch {
+      setDocAiError((prev) => ({
+        ...prev,
+        [docId]: "Error de conexión al invocar Cloudflare Workers AI."
+      }));
+    } finally {
+      setAnalyzingDocId(null);
+    }
+  };
+
+  const handleAssistFormAI = async (reqId: string, instanceId?: string) => {
+    const key = instanceId ? `${reqId}_${instanceId}` : reqId;
+    setAssistingFormKey(key);
+    setFormAssistError((prev) => ({ ...prev, [key]: "" }));
+    try {
+      const res = await fetch(`/api/cases/${id}/requirements/${reqId}/assist-form-ai`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceId })
+      });
+      const data = await res.json();
+      if (res.ok && data.suggestedValues) {
+        const normalized: Record<string, string> = {};
+        Object.entries(data.suggestedValues).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) {
+            normalized[k] = String(v);
+          }
+        });
+        setTempFormValues((prev) => ({
+          ...prev,
+          [key]: {
+            ...(prev[key] || {}),
+            ...normalized
+          }
+        }));
+      } else {
+        setFormAssistError((prev) => ({
+          ...prev,
+          [key]: data.message || "No se encontraron sugerencias disponibles."
+        }));
+      }
+    } catch {
+      setFormAssistError((prev) => ({
+        ...prev,
+        [key]: "Error de conexión con Cloudflare Workers AI."
+      }));
+    } finally {
+      setAssistingFormKey(null);
     }
   };
 
@@ -1236,15 +1316,70 @@ export default function CaseDetails({
 
                       {/* Meta state representation for uploaded items */}
                       {type === "DOCUMENT" && document && (
-                        <div className="mt-3 inline-flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[11px] text-slate-500 font-mono">
-                          <span className="font-bold">{document.fileName}</span>
-                          <span className="text-slate-300">|</span>
-                          <span>{document.fileSize}</span>
-                          <span className="text-slate-300">|</span>
-                          <span>v{document.version}</span>
-                          <span className="text-slate-300">|</span>
-                          <span className="font-bold text-slate-600">Por {document.uploadedBy}</span>
-                        </div>
+                        <>
+                          <div className="mt-3 inline-flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-2 text-[11px] text-slate-500 font-mono">
+                            <span className="font-bold">{document.fileName}</span>
+                            <span className="text-slate-300">|</span>
+                            <span>{document.fileSize}</span>
+                            <span className="text-slate-300">|</span>
+                            <span>v{document.version}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="font-bold text-slate-600">Por {document.uploadedBy}</span>
+                          </div>
+
+                          {docAiError[document.id] && (
+                            <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center gap-1.5">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>{docAiError[document.id]}</span>
+                            </div>
+                          )}
+
+                          {(() => {
+                            const effectiveAnalysis: DocumentAIAnalysis | null =
+                              analyzedDocMap[document.id] || document.aiAnalysis || null;
+                            if (!effectiveAnalysis) return null;
+                            const extractedEntries = Object.entries(effectiveAnalysis.extractedFields || {}).filter(
+                              ([, val]) => val !== null && val !== undefined && String(val).trim() !== ""
+                            );
+                            return (
+                              <div className="mt-2.5 p-3 rounded-xl bg-indigo-50/60 border border-indigo-100 text-left space-y-2 max-w-2xl">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-800">
+                                    <Sparkles className="h-3 w-3" />
+                                    Análisis Cloudflare Workers AI
+                                  </span>
+                                  {effectiveAnalysis.modelUsed && (
+                                    <span className="text-[9px] font-mono text-indigo-600 bg-white px-1.5 py-0.5 rounded border border-indigo-100">
+                                      {effectiveAnalysis.modelUsed}
+                                    </span>
+                                  )}
+                                </div>
+                                {effectiveAnalysis.summary && (
+                                  <p className="text-[11px] text-slate-700 leading-relaxed">
+                                    {effectiveAnalysis.summary}
+                                  </p>
+                                )}
+                                {extractedEntries.length > 0 && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                                    {extractedEntries.map(([fieldKey, fieldVal]) => (
+                                      <div key={fieldKey} className="bg-white/90 border border-indigo-100/80 rounded-lg px-2 py-1 text-[10px]">
+                                        <span className="text-slate-400 font-mono uppercase text-[9px]">{fieldKey}: </span>
+                                        <span className="text-slate-900 font-semibold">{String(fieldVal)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {effectiveAnalysis.observations && effectiveAnalysis.observations.length > 0 && (
+                                  <ul className="list-disc pl-4 space-y-0.5 text-[10px] text-slate-600">
+                                    {effectiveAnalysis.observations.map((obs, idx) => (
+                                      <li key={idx}>{obs}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </>
                       )}
                     </div>
 
@@ -1394,9 +1529,23 @@ export default function CaseDetails({
                             </div>
                           )}
 
-                          {/* Preview / Visualizer trigger */}
+                          {/* Preview / Visualizer & Workers AI trigger */}
                           {document && document.fileUrl && (
                             <>
+                              <button
+                                type="button"
+                                onClick={() => handleAnalyzeDocumentAI(document.id)}
+                                disabled={analyzingDocId === document.id}
+                                className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-colors"
+                                title="Analizar documento y extraer datos clave con Cloudflare Workers AI"
+                              >
+                                {analyzingDocId === document.id ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Sparkles className="h-3 w-3" />
+                                )}
+                                {analyzingDocId === document.id ? "Analizando..." : "Analizar con IA"}
+                              </button>
                               {currentUser.role !== "ASESOR" || req.downloadEnabled ? (
                                 <a
                                   href={document.fileUrl}
@@ -1625,7 +1774,24 @@ export default function CaseDetails({
                             ) : (
                               status !== "FINALIZADO" && (
                                 <div className="bg-slate-50 p-4 border border-slate-200 rounded-2xl space-y-3 text-left">
-                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">Ingreso de Datos Obligatorios</p>
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">Ingreso de Datos Obligatorios</p>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAssistFormAI(rId)}
+                                      disabled={assistingFormKey === rId}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 text-[10px] font-bold rounded-lg cursor-pointer disabled:opacity-50"
+                                      title="Sugerir valores desde participantes y documentos analizados con Workers AI"
+                                    >
+                                      {assistingFormKey === rId ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                                      {assistingFormKey === rId ? "Autocompletando..." : "Autocompletar con IA"}
+                                    </button>
+                                  </div>
+                                  {formAssistError[rId] && (
+                                    <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[10px]">
+                                      {formAssistError[rId]}
+                                    </div>
+                                  )}
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     {(req.formFields || []).map((field: any) => (
                                       <div key={field.name}>
@@ -2679,7 +2845,8 @@ export default function CaseDetails({
                     onClick={async () => {
                       try {
                         const response = await fetch(`/api/cases/${id}`, {
-                          method: "DELETE"
+                          method: "DELETE",
+                          credentials: "include"
                         });
                         if (response.ok) {
                           setShowSettings(false);
@@ -3660,12 +3827,31 @@ export default function CaseDetails({
                       }}
                       className="space-y-6 animate-in fade-in duration-200"
                     >
-                      <div className="bg-indigo-50/30 border border-indigo-100/50 p-4 rounded-2xl flex items-start gap-2.5">
-                        <Info className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
-                        <div className="text-[11px] text-indigo-900 leading-relaxed font-medium">
-                          Por favor complete todos los datos requeridos para registrar correctamente los datos de <b>{role} {activeInst.index}</b>.
+                      <div className="bg-indigo-50/30 border border-indigo-100/50 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <Info className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
+                          <div className="text-[11px] text-indigo-900 leading-relaxed font-medium">
+                            Por favor complete todos los datos requeridos para registrar correctamente los datos de <b>{role} {activeInst.index}</b>.
+                          </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAssistFormAI(reqId, activeInst.id)}
+                          disabled={assistingFormKey === `${reqId}_${activeInst.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-xl cursor-pointer disabled:opacity-50 transition-colors"
+                          title="Autocompletar con Cloudflare Workers AI"
+                        >
+                          {assistingFormKey === `${reqId}_${activeInst.id}` ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                          {assistingFormKey === `${reqId}_${activeInst.id}` ? "Autocompletando..." : "Autocompletar con IA"}
+                        </button>
                       </div>
+
+                      {formAssistError[`${reqId}_${activeInst.id}`] && (
+                        <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center gap-1.5">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                          <span>{formAssistError[`${reqId}_${activeInst.id}`]}</span>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                         {(req.formFields || []).map((field: any) => {

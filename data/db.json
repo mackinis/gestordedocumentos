@@ -1,0 +1,124 @@
+{
+  "users": [
+    {
+      "id": "usr-admin",
+      "email": "admin@test.com",
+      "password": "admin123",
+      "name": "Director General",
+      "role": "ADMIN",
+      "avatarUrl": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&h=150&q=80",
+      "status": "APPROVED",
+      "phone": "+541122223333"
+    },
+    {
+      "id": "usr-manager",
+      "email": "manager@test.com",
+      "password": "password123",
+      "name": "Gerente Martina",
+      "role": "MANAGER",
+      "avatarUrl": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&h=150&q=80",
+      "status": "APPROVED",
+      "phone": "+541122223333"
+    },
+    {
+      "id": "usr-asesor1",
+      "email": "asesor@test.com",
+      "password": "password123",
+      "name": "Asesor Gabriel",
+      "role": "ASESOR",
+      "avatarUrl": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&h=150&q=80",
+      "status": "APPROVED",
+      "phone": "+541122223333"
+    }
+  ],
+  "templates": [],
+  "cases": [],
+  "participants": [],
+  "documents": [],
+  "tasks": [],
+  "observations": [],
+  "notifications": [],
+  "messages": [],
+  "auditLogs": [
+    {
+      "id": "log-1794795745155-vmqx0mabg",
+      "userId": "usr-admin",
+      "userName": "Director General",
+      "userRole": "ADMIN",
+      "action": "LOGIN",
+      "entityType": "USER",
+      "entityId": "usr-admin",
+      "description": "El usuario Director General (ADMIN) inició sesión.",
+      "createdAt": "2026-11-16T02:22:25.155Z"
+    }
+  ],
+  "profileRequests": [],
+  "caseRequests": [],
+  "customTabs": [],
+  "settings": {
+    "verificationChannel": "EMAIL",
+    "messageTemplate": "Hola {{name}}, tu token de verificación es: {{token}}",
+    "resendApiKey": "",
+    "resendFromEmail": "onboarding@resend.dev",
+    "twilioSid": "",
+    "twilioAuthToken": "",
+    "twilioFromNumber": "",
+    "commercialFocus": "general",
+    "messagingSettings": {
+      "allowedSenders": [
+        "ADMIN",
+        "MANAGER",
+        "ASESOR"
+      ],
+      "awaitReplyRule": false,
+      "allowedChannels": [
+        {
+          "from": "ASESOR",
+          "to": "ASESOR",
+          "enabled": true
+        },
+        {
+          "from": "ASESOR",
+          "to": "MANAGER",
+          "enabled": true
+        },
+        {
+          "from": "ASESOR",
+          "to": "ADMIN",
+          "enabled": true
+        },
+        {
+          "from": "MANAGER",
+          "to": "MANAGER",
+          "enabled": true
+        },
+        {
+          "from": "MANAGER",
+          "to": "ASESOR",
+          "enabled": true
+        },
+        {
+          "from": "MANAGER",
+          "to": "ADMIN",
+          "enabled": true
+        },
+        {
+          "from": "ADMIN",
+          "to": "ASESOR",
+          "enabled": true
+        },
+        {
+          "from": "ADMIN",
+          "to": "MANAGER",
+          "enabled": true
+        },
+        {
+          "from": "ADMIN",
+          "to": "ADMIN",
+          "enabled": true
+        }
+      ]
+    },
+    "allowAdvisorViewProductivity": false
+  }
+}

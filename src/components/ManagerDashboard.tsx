@@ -84,16 +84,14 @@ export default function ManagerDashboard({
   // Admin section state variables
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminSettings, setAdminSettings] = useState<any>({
-    verificationChannel: "EMAIL",
-    messageTemplate: "Hola {{name}}, tu token de verificación es: {{token}}",
-    resendApiKey: "",
-    resendFromEmail: "onboarding@resend.dev",
-    twilioSid: "",
-    twilioAuthToken: "",
-    twilioFromNumber: "",
+    verificationChannel: "ADMIN_CODE",
+    messageTemplate: "Hola {{name}}, tu código de verificación es: {{token}}",
     commercialFocus: "general",
-    allowAdvisorViewProductivity: false
+    allowAdvisorViewProductivity: false,
+    cfEmailConfigured: false,
+    turnstileEnabled: false
   });
+  const [issuedCodes, setIssuedCodes] = useState<Record<string, { code: string; expiresAt: string }>>({});
   const [newManagerEmail, setNewManagerEmail] = useState("");
   const [newManagerPassword, setNewManagerPassword] = useState("");
   const [newManagerName, setNewManagerName] = useState("");
@@ -108,7 +106,7 @@ export default function ManagerDashboard({
 
   const fetchCustomTabs = async () => {
     try {
-      const res = await fetch("/api/custom-tabs");
+      const res = await fetch("/api/custom-tabs", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         setCustomTabs(data);
@@ -125,14 +123,12 @@ export default function ManagerDashboard({
     setAdminLoading(true);
     setAdminStatusMsg(null);
 
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
-
     try {
       const res = await fetch("/api/custom-tabs", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ name: newTabName.trim(), icon: newTabIcon })
       });
@@ -164,14 +160,10 @@ export default function ManagerDashboard({
     setAdminLoading(true);
     setAdminStatusMsg(null);
 
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
-
     try {
       const res = await fetch(`/api/custom-tabs/${tabId}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
 
       const data = await res.json();
@@ -216,15 +208,14 @@ export default function ManagerDashboard({
   const handleSaveEditedUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
     try {
       let res;
       if (currentUser.role === "MANAGER") {
         res = await fetch(`/api/users/${editingUser.id}/update-create-permission`, {
           method: "POST",
+          credentials: "include",
           headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
             canCreateCases: editCanCreateCases
@@ -233,9 +224,9 @@ export default function ManagerDashboard({
       } else {
         res = await fetch(`/api/admin/users/${editingUser.id}/update-profile`, {
           method: "POST",
+          credentials: "include",
           headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
             name: editName,
@@ -265,15 +256,14 @@ export default function ManagerDashboard({
   };
 
   const handleToggleCreatePermission = async (userToToggle: any) => {
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
     const newStatus = !userToToggle.canCreateCases;
     setAdminLoading(true);
     try {
       const res = await fetch(`/api/users/${userToToggle.id}/update-create-permission`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           canCreateCases: newStatus
@@ -299,25 +289,19 @@ export default function ManagerDashboard({
   const fetchAdminData = async () => {
     if (currentUser.role !== "ADMIN" && currentUser.role !== "MANAGER") return;
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
-      // Fetch users
-      const usersRes = await fetch("/api/users");
+      const usersRes = await fetch("/api/users", { credentials: "include" });
       if (usersRes.ok) {
         const usersData = await usersRes.json();
         if (currentUser.role === "MANAGER") {
-          // Managers see Advisors they manage (or all list)
           setAdminUsers(usersData.filter((u: any) => u.role === "ASESOR"));
         } else {
           setAdminUsers(usersData);
         }
       }
-      
-      // Fetch settings config
+
       if (currentUser.role === "ADMIN" || currentUser.role === "MANAGER") {
         const settingsRes = await fetch("/api/admin/settings", {
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
+          credentials: "include"
         });
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
@@ -340,14 +324,35 @@ export default function ManagerDashboard({
     }
   }, [activeTab]);
 
+  const handleIssueVerificationCode = async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${id}/issue-verification-code`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const data = await res.json();
+      if (res.ok && data.verificationCode) {
+        setIssuedCodes((prev) => ({
+          ...prev,
+          [id]: { code: data.verificationCode, expiresAt: data.expiresAt }
+        }));
+        setAdminStatusMsg({
+          type: "success",
+          text: `Código de 16 caracteres generado para el asesor: ${data.verificationCode}`
+        });
+      } else {
+        setAdminStatusMsg({ type: "error", text: data.message || "Error al generar código de verificación." });
+      }
+    } catch (err: any) {
+      setAdminStatusMsg({ type: "error", text: err.message });
+    }
+  };
+
   const handleApproveAdvisor = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch(`/api/admin/users/${id}/approve`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -364,12 +369,9 @@ export default function ManagerDashboard({
 
   const handleRejectAdvisor = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch(`/api/admin/users/${id}/reject`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -386,12 +388,9 @@ export default function ManagerDashboard({
 
   const handleSuspendUser = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch(`/api/admin/users/${id}/suspend`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -408,12 +407,9 @@ export default function ManagerDashboard({
 
   const handleBanUser = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch(`/api/admin/users/${id}/ban`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -430,12 +426,9 @@ export default function ManagerDashboard({
 
   const handleDeleteUser = async (id: string) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       const data = await res.json();
       if (res.ok) {
@@ -451,13 +444,12 @@ export default function ManagerDashboard({
   };
 
   const handleRejectCaseRequest = async (requestId: string) => {
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
     try {
       const res = await fetch(`/api/case-requests/${requestId}/resolve`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ status: "RECHAZADO" })
       });
@@ -475,13 +467,10 @@ export default function ManagerDashboard({
   };
 
   const handleDeleteCaseRequest = async (requestId: string) => {
-    const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
     try {
       const res = await fetch(`/api/case-requests/${requestId}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         onRefreshDashboard();
@@ -505,14 +494,13 @@ export default function ManagerDashboard({
     setAdminLoading(true);
     setAdminStatusMsg(null);
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const isAsesor = newUserRole === "ASESOR";
       const targetEndpoint = isAsesor ? "/api/admin/create-advisor" : "/api/admin/create-manager";
       const res = await fetch(targetEndpoint, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           email: newManagerEmail,
@@ -548,18 +536,18 @@ export default function ManagerDashboard({
     setAdminLoading(true);
     setAdminStatusMsg(null);
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser.id}`;
       const res = await fetch("/api/admin/settings", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(adminSettings)
       });
       const data = await res.json();
       if (res.ok) {
-        setAdminStatusMsg({ type: "success", text: "Canales de verificación y textos de plantillas guardados con éxito real." });
+        if (data.settings) setAdminSettings(data.settings);
+        setAdminStatusMsg({ type: "success", text: "Configuración nativa de verificación y preferencias guardadas en D1." });
         fetchAdminData();
         if (onRefreshDashboard) onRefreshDashboard();
       } else {
@@ -645,12 +633,11 @@ export default function ManagerDashboard({
 
     try {
       setAdminLoading(true);
-      const token = localStorage.getItem("token") || "";
       const res = await fetch("/api/admin/settings", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(updatedSettings)
       });
@@ -690,12 +677,11 @@ export default function ManagerDashboard({
 
     try {
       setAdminLoading(true);
-      const token = localStorage.getItem("token") || "";
       const res = await fetch("/api/admin/settings", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(updatedSettings)
       });
@@ -736,12 +722,11 @@ export default function ManagerDashboard({
 
     try {
       setAdminLoading(true);
-      const token = localStorage.getItem("token") || "";
       const res = await fetch("/api/admin/settings", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(updatedSettings)
       });
@@ -803,6 +788,7 @@ export default function ManagerDashboard({
         try {
           const response = await fetch("/api/templates/parse-pdf", {
             method: "POST",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               fileName: file.name,
@@ -861,6 +847,7 @@ export default function ManagerDashboard({
     try {
       const response = await fetch("/api/templates/generate-ai", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sector: aiSector, requirementsDescription: aiDescription })
       });
@@ -1345,7 +1332,7 @@ export default function ManagerDashboard({
                                 {/* Status Badges */}
                                 {isPendingCode && (
                                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-50 border border-amber-200 text-amber-800">
-                                    ⏳ Token
+                                    ⏳ Código
                                   </span>
                                 )}
                                 {isPendingApproval && (
@@ -1374,7 +1361,17 @@ export default function ManagerDashboard({
                                   </span>
                                 )}
 
-                                <div className="flex items-center gap-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {isPendingCode && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleIssueVerificationCode(u.id)}
+                                      className="p-1 px-2.5 rounded-lg text-[10px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors cursor-pointer"
+                                      title="Generar código único de 16 caracteres para que el asesor complete su verificación"
+                                    >
+                                      Generar Código
+                                    </button>
+                                  )}
                                   {currentUser.role === "ADMIN" ? (
                                     <>
                                       {/* Approve / Activate action for unapproved or suspended/banned/rejected states */}
@@ -1392,7 +1389,7 @@ export default function ManagerDashboard({
                                       {(isPendingCode || isPendingApproval) && !isRejected && (
                                         <button
                                           onClick={() => handleRejectAdvisor(u.id)}
-                                          className="p-1 px-2.5 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-rose-550 hover:bg-rose-50 text-rose-700 transition-colors cursor-pointer border border-slate-200"
+                                          className="p-1 px-2.5 rounded-lg text-[10px] font-bold bg-slate-100 hover:bg-rose-50 text-rose-700 transition-colors cursor-pointer border border-slate-200"
                                           title="Rechazar solicitud"
                                         >
                                           Rechazar
@@ -1411,7 +1408,7 @@ export default function ManagerDashboard({
                                           </button>
                                           <button
                                             onClick={() => handleBanUser(u.id)}
-                                            className="p-1 px-2.5 rounded-lg text-[10px] font-bold bg-red-650 bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer"
+                                            className="p-1 px-2.5 rounded-lg text-[10px] font-bold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer"
                                             title="Banear usuario permanentemente"
                                           >
                                             Banear
@@ -1472,6 +1469,13 @@ export default function ManagerDashboard({
                                     )
                                   )}
                                 </div>
+
+                                {issuedCodes[u.id] && (
+                                  <div className="w-full sm:w-auto mt-1 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5 text-[10px] text-indigo-950 font-mono">
+                                    <span className="font-bold">Código emitido: </span>
+                                    <span className="select-all font-bold tracking-wider">{issuedCodes[u.id].code}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -2077,17 +2081,17 @@ export default function ManagerDashboard({
               </form>
             </div>
 
-            {/* Left Column: Real Channels Config */}
+            {/* Left Column: Cloudflare Native Verification Config */}
             <div className="lg:col-span-6 space-y-6">
-              {/* Section 2: Real Channels Config (Resend & Twilio) */}
+              {/* Section 2: Verificación Nativa en Cloudflare */}
               <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
-                        ⚙ Canal de Envío de Fichas
+                        ⚙ Verificación Segura Nativa en Cloudflare
                       </h3>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        Canal oficial de dispersión física para el token rústico de 16 caracteres.
+                        Flujo oficial de verificación y alta de asesores ejecutado 100 % dentro de Cloudflare Workers, KV y D1.
                       </p>
                     </div>
                   </div>
@@ -2095,19 +2099,40 @@ export default function ManagerDashboard({
                   <form onSubmit={handleSaveSettingsSubmit} className="space-y-4">
                     <div>
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                        Canal de Distribución de Registro
+                        Canal de Verificación de Registro
                       </label>
                       <select
-                        value={adminSettings.verificationChannel || "EMAIL"}
+                        value={adminSettings.verificationChannel || "ADMIN_CODE"}
                         onChange={(e) =>
                           setAdminSettings({ ...adminSettings, verificationChannel: e.target.value })
                         }
                         className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-slate-950 font-semibold"
                       >
-                        <option value="EMAIL">Email Único (Resend API)</option>
-                        <option value="SMS">SMS Único (Twilio SMS)</option>
-                        <option value="BOTH">Doble Despacho (Email + SMS)</option>
+                        <option value="ADMIN_CODE">Código de 16 caracteres emitido por Admin/Manager (Recomendado)</option>
+                        <option value="DIRECT_APPROVAL">Aprobación Manual Directa (Sin código previo)</option>
+                        <option value="CF_SEND_EMAIL" disabled={!adminSettings.cfEmailConfigured}>
+                          Cloudflare Email Service (SEND_EMAIL){!adminSettings.cfEmailConfigured ? " — No vinculado en Wrangler" : ""}
+                        </option>
                       </select>
+                    </div>
+
+                    {/* Estado de bindings nativos de Cloudflare */}
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/80 space-y-2 text-[11px] text-slate-700">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-800">Cloudflare Turnstile</span>
+                        <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${adminSettings.turnstileEnabled ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                          {adminSettings.turnstileEnabled ? "Activo en autenticación" : "Llaves no configuradas en entorno"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-800">Cloudflare Email Service (SEND_EMAIL)</span>
+                        <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold ${adminSettings.cfEmailConfigured ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>
+                          {adminSettings.cfEmailConfigured ? "Vinculado" : "No configurado (requiere plan de pago y DNS)"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-200/70 leading-relaxed">
+                        Cloudflare Workers no provee envío nativo de SMS; las integraciones externas (Resend y Twilio) fueron eliminadas conforme a la arquitectura 100 % Cloudflare. En modo <b>ADMIN_CODE</b>, genere el código de un solo uso directamente en la tarjeta de cada asesor pendiente.
+                      </p>
                     </div>
 
                     {/* Permiso de productividad para asesores */}
@@ -2128,84 +2153,9 @@ export default function ManagerDashboard({
                       </label>
                     </div>
 
-                    {/* Resend configurations */}
-                    {(adminSettings.verificationChannel === "EMAIL" ||
-                      adminSettings.verificationChannel === "BOTH") && (
-                      <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 space-y-3">
-                        <span className="text-[10px] uppercase font-bold text-slate-500">Configuración RESEND API</span>
-                        <div>
-                          <label className="block text-[9 px] text-slate-500 mb-0.5">Resend API Key</label>
-                          <input
-                            type="password"
-                            value={adminSettings.resendApiKey || ""}
-                            onChange={(e) =>
-                              setAdminSettings({ ...adminSettings, resendApiKey: e.target.value })
-                            }
-                            placeholder="re_xxxxxxxxxxxxxxxxxxxxxx"
-                            className="w-full text-[11px] p-2 rounded border border-slate-200 focus:outline-none font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 mb-0.5">Correo Remitente (From)</label>
-                          <input
-                            type="text"
-                            value={adminSettings.resendFromEmail || "onboarding@resend.dev"}
-                            onChange={(e) =>
-                              setAdminSettings({ ...adminSettings, resendFromEmail: e.target.value })
-                            }
-                            className="w-full text-[11px] p-2 rounded border border-slate-200 focus:outline-none font-mono"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Twilio configurations */}
-                    {(adminSettings.verificationChannel === "SMS" ||
-                      adminSettings.verificationChannel === "BOTH") && (
-                      <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/70 space-y-3">
-                        <span className="text-[10px] uppercase font-bold text-slate-500">Configuración TWILIO</span>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 mb-0.5">Account SID</label>
-                          <input
-                            type="text"
-                            value={adminSettings.twilioSid || ""}
-                            onChange={(e) =>
-                              setAdminSettings({ ...adminSettings, twilioSid: e.target.value })
-                            }
-                            placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxx"
-                            className="w-full text-[11px] p-2 rounded border border-slate-200 focus:outline-none font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 mb-0.5">Auth Token</label>
-                          <input
-                            type="password"
-                            value={adminSettings.twilioAuthToken || ""}
-                            onChange={(e) =>
-                              setAdminSettings({ ...adminSettings, twilioAuthToken: e.target.value })
-                            }
-                            placeholder="Token Secreto"
-                            className="w-full text-[11px] p-2 rounded border border-slate-200 focus:outline-none font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] text-slate-500 mb-0.5">Número Remitente Twilio</label>
-                          <input
-                            type="text"
-                            value={adminSettings.twilioFromNumber || ""}
-                            onChange={(e) =>
-                              setAdminSettings({ ...adminSettings, twilioFromNumber: e.target.value })
-                            }
-                            placeholder="ej. +12345678"
-                            className="w-full text-[11px] p-2 rounded border border-slate-200 focus:outline-none font-mono"
-                          />
-                        </div>
-                      </div>
-                    )}
-
                     <div>
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                        Plantilla de Mensaje
+                        Plantilla de Mensaje de Verificación
                       </label>
                       <textarea
                         rows={2}
@@ -2213,11 +2163,11 @@ export default function ManagerDashboard({
                         onChange={(e) =>
                           setAdminSettings({ ...adminSettings, messageTemplate: e.target.value })
                         }
-                        placeholder="ej. Hola {{name}}, ingresa este token: {{token}}"
+                        placeholder="ej. Hola {{name}}, ingresa este código: {{token}}"
                         className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:outline-none"
                       />
                       <span className="text-[9px] text-slate-400 mt-0.5 leading-tight block">
-                        Las macros de sustitución <b>{"{{name}}"}</b> y <b>{"{{token}}"}</b> serán reemplazadas automáticamente durante el envío de SMS/Email.
+                        Las macros <b>{"{{name}}"}</b> y <b>{"{{token}}"}</b> se aplican cuando se utiliza Cloudflare Email Service (SEND_EMAIL).
                       </span>
                     </div>
 
@@ -2226,7 +2176,7 @@ export default function ManagerDashboard({
                       disabled={adminLoading}
                       className="w-full bg-slate-900 hover:bg-slate-950 text-white text-xs font-semibold py-2 rounded-lg transition-all cursor-pointer"
                     >
-                      {adminLoading ? "Salvando..." : "Guardar Preferencias de Notificación"}
+                      {adminLoading ? "Salvando..." : "Guardar Preferencias de Verificación"}
                     </button>
                   </form>
                 </div>
@@ -3142,7 +3092,7 @@ export default function ManagerDashboard({
                 className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-xs"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Diseñar con Gemini AI
+                Diseñar con Workers AI
               </button>
 
               <button
@@ -3301,7 +3251,7 @@ export default function ManagerDashboard({
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
                 <div>
                   <h3 className="font-display font-bold text-slate-950 text-base">
-                    {usePDF ? "Análisis de Plantilla PDF con Gemini" : useAI ? "Generación Inteligente asistida por Gemini" : "Creando Plantilla Operativa de Trabajo"}
+                    {usePDF ? "Análisis de Plantilla PDF con Workers AI" : useAI ? "Generación Inteligente con Cloudflare Workers AI" : "Creando Plantilla Operativa de Trabajo"}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Defina etapas secuenciales, formularios y subida de documentación obligatoria.
@@ -3329,7 +3279,7 @@ export default function ManagerDashboard({
                     <div>
                       <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Subir Archivo PDF de Plantilla</h4>
                       <p className="text-[11px] text-slate-500 mt-1 max-w-sm">
-                        Suba un documento PDF previamente creado con el proceso operativo. Gemini analizará el contenido para extraer etapas y requisitos automáticamente.
+                        Suba un documento PDF con texto digital del proceso operativo. Cloudflare Workers AI (toMarkdown + Llama) extraerá etapas y requisitos automáticamente.
                       </p>
                     </div>
 
@@ -3353,7 +3303,7 @@ export default function ManagerDashboard({
                     {pdfLoading && (
                       <div className="flex items-center gap-2 text-xs text-indigo-700 font-semibold animate-pulse mt-2">
                         <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        Analizando estructura del documento con Gemini 3.5...
+                        Analizando estructura del documento con Cloudflare Workers AI...
                       </div>
                     )}
                   </div>
@@ -3389,7 +3339,7 @@ export default function ManagerDashboard({
                   </div>
                 </div>
               ) : useAI ? (
-                /* Gemini Form Integration */
+                /* Cloudflare Workers AI Form Integration */
                 <form onSubmit={handleGenerateAI} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {commercialFocus === "general" ? (
@@ -3462,7 +3412,7 @@ export default function ManagerDashboard({
                       {aiLoading ? (
                         <>
                           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                          Generando con Gemini AI...
+                          Generando con Workers AI...
                         </>
                       ) : (
                         <>

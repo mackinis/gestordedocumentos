@@ -1,0 +1,8 @@
+# Local development secrets for `wrangler dev` (copy to `.dev.vars`, never commit `.dev.vars`)
+SESSION_SECRET=change-this-to-a-random-64-char-hex-secret-in-production
+BOOTSTRAP_ADMIN_SECRET=change-this-bootstrap-secret-for-initial-admin
+# Cloudflare Turnstile test keys (always pass in local testing; replace with real dashboard keys in prod):
+# Site Key (always pass): 1x00000000000000000000AA
+# Secret Key (always pass): 1x0000000000000000000000000000000AA
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=

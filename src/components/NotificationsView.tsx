@@ -43,9 +43,7 @@ export default function NotificationsView({
     try {
       const res = await fetch(`/api/notifications/${id}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         onRefreshNotifications();
@@ -73,9 +71,7 @@ export default function NotificationsView({
     try {
       const res = await fetch(`/api/notifications/${id}/read`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         onRefreshNotifications();
@@ -93,9 +89,7 @@ export default function NotificationsView({
     try {
       const res = await fetch(`/api/notifications/${id}/archive`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         onRefreshNotifications();
@@ -112,9 +106,7 @@ export default function NotificationsView({
     try {
       const res = await fetch("/api/notifications/read-all", {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
-        }
+        credentials: "include"
       });
       if (res.ok) {
         onRefreshNotifications();

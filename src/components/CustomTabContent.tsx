@@ -51,12 +51,11 @@ export default function CustomTabContent({ tab, currentUser, onRefresh }: Custom
     setSuccessMsg("");
 
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`/api/custom-tabs/${tab.id}/items`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": token ? `Bearer ${token}` : ""
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           title: title.trim(),
@@ -90,12 +89,9 @@ export default function CustomTabContent({ tab, currentUser, onRefresh }: Custom
     if (!window.confirm("¿Está seguro de que desea eliminar esta sección?")) return;
 
     try {
-      const token = localStorage.getItem("token");
       const res = await fetch(`/api/custom-tabs/${tab.id}/items/${itemId}`, {
         method: "DELETE",
-        headers: {
-          "Authorization": token ? `Bearer ${token}` : ""
-        }
+        credentials: "include"
       });
 
       if (res.ok) {
@@ -218,7 +214,7 @@ export default function CustomTabContent({ tab, currentUser, onRefresh }: Custom
               }`}
             >
               <Sparkles className={`h-3.5 w-3.5 ${useAi ? "animate-pulse" : ""}`} />
-              {useAi ? "Asistente IA: Activo" : "Usar Asistente IA (Gemini)"}
+              {useAi ? "Asistente IA: Activo" : "Usar Asistente IA (Workers AI)"}
             </button>
           </div>
 
@@ -261,7 +257,7 @@ export default function CustomTabContent({ tab, currentUser, onRefresh }: Custom
             ) : (
               <div>
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
-                  ¿Sobre qué tema deseas que Gemini genere la sección?
+                  ¿Sobre qué tema deseas que Cloudflare Workers AI genere la sección?
                 </label>
                 <textarea
                   rows={4}
@@ -293,7 +289,7 @@ export default function CustomTabContent({ tab, currentUser, onRefresh }: Custom
                 {loading ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Generando con Gemini...
+                    Generando con Workers AI...
                   </>
                 ) : (
                   <>

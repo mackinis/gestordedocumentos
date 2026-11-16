@@ -43,6 +43,7 @@ import ProfileModal from "./components/ProfileModal";
 import CustomTabContent from "./components/CustomTabContent";
 import MessagesView from "./components/MessagesView";
 import NotificationsView from "./components/NotificationsView";
+import TurnstileWidget from "./components/TurnstileWidget";
 import { getTranslations, getText } from "./utils/commercialTranslations";
 import { User, Case, ProcessTemplate, Notification, AuditLog, CaseRequest } from "./types";
 
@@ -113,8 +114,21 @@ export default function App() {
   const [credSuccessMessage, setCredSuccessMessage] = useState("");
   const [credErrorMessage, setCredErrorMessage] = useState("");
 
-  // Auth/Register/Verify credentials states
+  // Auth/Setup/Register/Verify credentials states
   const [authMode, setAuthMode] = useState<"login" | "register" | "verify">("login");
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [requiresBootstrapSecret, setRequiresBootstrapSecret] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+
+  const [setupName, setSetupName] = useState("");
+  const [setupEmail, setSetupEmail] = useState("");
+  const [setupPhone, setSetupPhone] = useState("");
+  const [setupPassword, setSetupPassword] = useState("");
+  const [setupSecret, setSetupSecret] = useState("");
+  const [showSetupPassword, setShowSetupPassword] = useState(false);
+
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [regName, setRegName] = useState("");
@@ -130,24 +144,26 @@ export default function App() {
   const [authSuccess, setAuthSuccess] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Session verification on app startup
+  // Session verification on app startup (HttpOnly cookie + initial admin setup check)
   const checkStoredSession = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     try {
-      const res = await fetch("/api/auth/me", {
-        headers: {
-          "Authorization": `Bearer ${token}`
-        }
-      });
-      if (res.ok) {
-        const userData = await res.json();
+      const [setupRes, meRes] = await Promise.all([
+        fetch("/api/auth/setup-status", { credentials: "include" }),
+        fetch("/api/auth/me", { credentials: "include" })
+      ]);
+
+      if (setupRes.ok) {
+        const setupData = await setupRes.json();
+        setNeedsSetup(Boolean(setupData.needsSetup));
+        setRequiresBootstrapSecret(Boolean(setupData.requiresBootstrapSecret));
+        setTurnstileSiteKey(setupData.turnstileSiteKey || null);
+      }
+
+      if (meRes.ok) {
+        const userData = await meRes.json();
         setCurrentUser(userData);
       } else {
-        localStorage.removeItem("token");
+        setCurrentUser(null);
       }
     } catch (e) {
       console.error("Failed to restore previous session:", e);
@@ -159,17 +175,13 @@ export default function App() {
   // Hydrate lists from backend full REST API
   const syncData = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const headersJSON: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) {
-        headersJSON["Authorization"] = `Bearer ${token}`;
+      const usersRes = await fetch("/api/users", { credentials: "include" });
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        setAvailableUsers(usersData);
       }
 
-      const usersRes = await fetch("/api/users");
-      const usersData = await usersRes.json();
-      setAvailableUsers(usersData);
-
-      const focusRes = await fetch("/api/settings/public");
+      const focusRes = await fetch("/api/settings/public", { credentials: "include" });
       if (focusRes.ok) {
         const focusData = await focusRes.json();
         setCommercialFocus(focusData.commercialFocus || "general");
@@ -181,48 +193,58 @@ export default function App() {
         }
       }
 
-      const casesRes = await fetch("/api/cases", { headers: headersJSON });
-      const casesData = await casesRes.json();
-      setCases(casesData);
-
-      const templatesRes = await fetch("/api/templates", { headers: headersJSON });
-      const templatesData = await templatesRes.json();
-      setTemplates(templatesData);
-      if (templatesData.length > 0 && !nCaseTplId) {
-        setNCaseTplId(templatesData[0].id);
+      const casesRes = await fetch("/api/cases", { credentials: "include" });
+      if (casesRes.ok) {
+        const casesData = await casesRes.json();
+        setCases(casesData);
       }
 
-      const statsRes = await fetch("/api/dashboard/stats", { headers: headersJSON });
-      const statsData = await statsRes.json();
-      setStats(statsData);
+      const templatesRes = await fetch("/api/templates", { credentials: "include" });
+      if (templatesRes.ok) {
+        const templatesData = await templatesRes.json();
+        setTemplates(templatesData);
+        if (templatesData.length > 0 && !nCaseTplId) {
+          setNCaseTplId(templatesData[0].id);
+        }
+      }
 
-      const auditRes = await fetch("/api/audit-logs", { headers: headersJSON });
-      const auditData = await auditRes.json();
-      setAuditLogs(auditData);
+      const statsRes = await fetch("/api/dashboard/stats", { credentials: "include" });
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
 
-      const notifRes = await fetch("/api/notifications", { headers: headersJSON });
-      const notifData = await notifRes.json();
-      setNotifications(notifData);
+      const auditRes = await fetch("/api/audit-logs", { credentials: "include" });
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        setAuditLogs(auditData);
+      }
 
-      const msgRes = await fetch("/api/messages?box=inbox", { headers: headersJSON });
+      const notifRes = await fetch("/api/notifications", { credentials: "include" });
+      if (notifRes.ok) {
+        const notifData = await notifRes.json();
+        setNotifications(notifData);
+      }
+
+      const msgRes = await fetch("/api/messages?box=inbox", { credentials: "include" });
       if (msgRes.ok) {
         const msgData = await msgRes.json();
         setMessages(msgData);
       }
 
-      const customTabsRes = await fetch("/api/custom-tabs", { headers: headersJSON });
+      const customTabsRes = await fetch("/api/custom-tabs", { credentials: "include" });
       if (customTabsRes.ok) {
         const customTabsData = await customTabsRes.json();
         setCustomTabs(customTabsData);
       }
 
-      const caseReqsRes = await fetch("/api/case-requests", { headers: headersJSON });
+      const caseReqsRes = await fetch("/api/case-requests", { credentials: "include" });
       if (caseReqsRes.ok) {
         const caseReqsData = await caseReqsRes.json();
         setCaseRequests(caseReqsData);
       }
 
-      const pendingAppRes = await fetch("/api/dashboard/pending-approvals", { headers: headersJSON });
+      const pendingAppRes = await fetch("/api/dashboard/pending-approvals", { credentials: "include" });
       if (pendingAppRes.ok) {
         const pendingAppData = await pendingAppRes.json();
         setHasPendingApprovals(!!pendingAppData.hasPending);
@@ -241,7 +263,7 @@ export default function App() {
 
   const syncCaseDetails = async (caseId: string) => {
     try {
-      const detailsRes = await fetch(`/api/cases/${caseId}`);
+      const detailsRes = await fetch(`/api/cases/${caseId}`, { credentials: "include" });
       if (detailsRes.ok) {
         const detailsData = await detailsRes.json();
         setCaseDetails(detailsData);
@@ -278,6 +300,55 @@ export default function App() {
     }
   }, [activeTab, forcedSubTab, hasPendingApprovals]);
 
+  // Initial Admin bootstrap setup (runs once when D1 has 0 ADMIN users)
+  const handleSetupAdminSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!setupName.trim() || !setupEmail.trim() || setupPassword.length < 8) {
+      setAuthError("Ingrese nombre, correo válido y una contraseña de al menos 8 caracteres.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError("");
+    setAuthSuccess("");
+    try {
+      const response = await fetch("/api/auth/setup-admin", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: setupName.trim(),
+          email: setupEmail.trim(),
+          phone: setupPhone.trim(),
+          password: setupPassword,
+          setupSecret: setupSecret.trim() || undefined,
+          turnstileToken: turnstileToken || undefined
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setNeedsSetup(false);
+        setCurrentUser(data.user);
+        setSetupName("");
+        setSetupEmail("");
+        setSetupPhone("");
+        setSetupPassword("");
+        setSetupSecret("");
+        setTurnstileToken("");
+        setAuthSuccess("Director General inicializado con éxito.");
+      } else {
+        setAuthError(data.message || "No se pudo completar la inicialización del administrador.");
+        setTurnstileResetSignal(s => s + 1);
+        setTurnstileToken("");
+      }
+    } catch (err: any) {
+      setAuthError(err?.message || "Error de conexión durante la inicialización.");
+      setTurnstileResetSignal(s => s + 1);
+      setTurnstileToken("");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   // Log in user
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,8 +362,13 @@ export default function App() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+          turnstileToken: turnstileToken || undefined
+        })
       });
       
       let data: any;
@@ -303,17 +379,21 @@ export default function App() {
       }
 
       if (response.ok && data.success) {
-        localStorage.setItem("token", data.token);
         setCurrentUser(data.user);
         setLoginEmail("");
         setLoginPassword("");
+        setTurnstileToken("");
         setAuthSuccess("Acceso concedido.");
       } else {
         setAuthError(data.message || "Credenciales de acceso incorrectas.");
+        setTurnstileResetSignal(s => s + 1);
+        setTurnstileToken("");
       }
     } catch (err: any) {
       console.error("Login Error:", err);
       setAuthError(err.message || "No se pudo conectar con el servidor de autenticación.");
+      setTurnstileResetSignal(s => s + 1);
+      setTurnstileToken("");
     } finally {
       setAuthLoading(false);
     }
@@ -332,24 +412,40 @@ export default function App() {
     try {
       const response = await fetch("/api/auth/register-advisor", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: regName,
           email: regEmail,
           phone: regPhone,
-          password: regPassword
+          password: regPassword,
+          turnstileToken: turnstileToken || undefined
         })
       });
       const data = await response.json();
       if (response.ok && data.success) {
-        setVerifyUserId(data.userId);
-        setAuthSuccess(data.message || "Registro inicial exitoso. Código de 16 caracteres enviado.");
-        setAuthMode("verify");
+        setTurnstileToken("");
+        if (data.requiresCodeEntry === false) {
+          setAuthSuccess(data.message || "Registro enviado para aprobación del Director General.");
+          setAuthMode("login");
+          setRegName("");
+          setRegEmail("");
+          setRegPhone("");
+          setRegPassword("");
+        } else {
+          setVerifyUserId(data.userId);
+          setAuthSuccess(data.message || "Registro inicial completado.");
+          setAuthMode("verify");
+        }
       } else {
         setAuthError(data.message || "Error al completar el registro del asesor.");
+        setTurnstileResetSignal(s => s + 1);
+        setTurnstileToken("");
       }
     } catch (err) {
       setAuthError("Error de red conectando con el registro.");
+      setTurnstileResetSignal(s => s + 1);
+      setTurnstileToken("");
     } finally {
       setAuthLoading(false);
     }
@@ -359,7 +455,7 @@ export default function App() {
   const handleVerifyTokenSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!verificationToken) {
-      setAuthError("Ingrese el token de seguridad rústico de 16 caracteres.");
+      setAuthError("Ingrese el código de seguridad de 16 caracteres.");
       return;
     }
     setAuthLoading(true);
@@ -368,6 +464,7 @@ export default function App() {
     try {
       const response = await fetch("/api/auth/verify-token", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: verifyUserId,
@@ -385,18 +482,25 @@ export default function App() {
         setRegPhone("");
         setRegPassword("");
       } else {
-        setAuthError(data.message || "El token de validación es incorrecto.");
+        setAuthError(data.message || "El código de validación es incorrecto.");
       }
     } catch (err) {
-      setAuthError("Error de comunicación verificando el token.");
+      setAuthError("Error de comunicación verificando el código.");
     } finally {
       setAuthLoading(false);
     }
   };
 
-  // Secure manual sign out action
-  const handleLogout = () => {
-    localStorage.removeItem("token");
+  // Secure manual sign out action (revokes KV session + clears HttpOnly cookie)
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include"
+      });
+    } catch {
+      // ignore network error on logout
+    }
     setCurrentUser(null);
     setSimulatedUser(null);
     setActiveCaseId(null);
@@ -404,6 +508,8 @@ export default function App() {
     setAuthMode("login");
     setAuthError("");
     setAuthSuccess("");
+    setTurnstileToken("");
+    setTurnstileResetSignal(s => s + 1);
   };
 
   // Select target case details
@@ -417,6 +523,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/participants`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(part)
       });
@@ -432,7 +539,8 @@ export default function App() {
   const handleDeleteParticipant = async (caseId: string, partId: string) => {
     try {
       const response = await fetch(`/api/cases/${caseId}/participants/${partId}`, {
-        method: "DELETE"
+        method: "DELETE",
+        credentials: "include"
       });
       if (response.ok) {
         await syncData();
@@ -447,11 +555,15 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/upload`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(fileData)
       });
       if (response.ok) {
         await syncData();
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        alert(errData.message || "Error al cargar el documento.");
       }
     } catch (err) {
       console.error("Error uploading document:", err);
@@ -463,6 +575,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/approve`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
@@ -479,6 +592,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/reject`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason, userId: currentUser?.id })
       });
@@ -495,6 +609,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/toggle-download`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ downloadEnabled: enabled, userId: currentUser?.id })
       });
@@ -511,6 +626,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/request-upload`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id, reason })
       });
@@ -527,6 +643,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/adjustment-requests`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, userId: currentUser?.id })
       });
@@ -543,6 +660,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/adjustment-requests/${reqId}/approve`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
@@ -559,6 +677,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/adjustment-requests/${reqId}/reject`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id, rejectionReason })
       });
@@ -575,6 +694,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/configure-upload`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...config, userId: currentUser?.id })
       });
@@ -591,6 +711,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/form`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values)
       });
@@ -607,6 +728,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/requirements/${reqId}/task`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, userId: currentUser?.id })
       });
@@ -623,6 +745,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/observations`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, entityType, entityId, userId: currentUser?.id, bloquearRevision })
       });
@@ -639,6 +762,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/observations/${obsId}/resolve`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ response: responseText, userId: currentUser?.id })
       });
@@ -655,6 +779,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/stage/advance`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
@@ -672,6 +797,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/stage/retrocede`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
@@ -687,6 +813,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/request-review`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type, userId: currentUser?.id })
       });
@@ -707,6 +834,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/cancel-review`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
@@ -727,6 +855,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/toggle-review-block`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blocked, reason, userId: currentUser?.id })
       });
@@ -742,6 +871,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/resolve-review`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, userId: currentUser?.id })
       });
@@ -756,7 +886,7 @@ export default function App() {
   // Notification Mark read
   const handleMarkNotifRead = async (id: string) => {
     try {
-      await fetch(`/api/notifications/${id}/read`, { method: "POST" });
+      await fetch(`/api/notifications/${id}/read`, { method: "POST", credentials: "include" });
       await syncData();
     } catch (err) {
       console.error("Failed notification update", err);
@@ -765,7 +895,7 @@ export default function App() {
 
   const handleMarkAllNotifsRead = async () => {
     try {
-      await fetch(`/api/notifications/read-all`, { method: "POST" });
+      await fetch(`/api/notifications/read-all`, { method: "POST", credentials: "include" });
       await syncData();
     } catch (e) {
       console.error(e);
@@ -777,6 +907,7 @@ export default function App() {
     try {
       const response = await fetch("/api/templates", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(templateObj)
       });
@@ -793,7 +924,8 @@ export default function App() {
     if (!confirm("¿Está seguro de eliminar esta plantilla de procesos del catálogo?")) return;
     try {
       const response = await fetch(`/api/templates/${id}`, {
-        method: "DELETE"
+        method: "DELETE",
+        credentials: "include"
       });
       if (response.ok) {
         await syncData();
@@ -808,6 +940,7 @@ export default function App() {
     try {
       const response = await fetch(`/api/cases/${caseId}/update`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedFields)
       });
@@ -822,15 +955,10 @@ export default function App() {
   // Claim Case (Managers Claim Unassigned Case)
   const handleClaimCase = async (caseId: string) => {
     try {
-      const token = localStorage.getItem("token");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-
       const response = await fetch(`/api/cases/${caseId}/claim`, {
         method: "POST",
-        headers,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: currentUser?.id })
       });
       if (response.ok) {
@@ -883,6 +1011,7 @@ export default function App() {
     try {
       const response = await fetch("/api/cases", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(casePayload)
       });
@@ -890,12 +1019,11 @@ export default function App() {
       if (response.ok) {
         if (activeCaseRequestId) {
           try {
-            const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser?.id}`;
             await fetch(`/api/case-requests/${activeCaseRequestId}/resolve`, {
               method: "POST",
+              credentials: "include",
               headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
+                "Content-Type": "application/json"
               },
               body: JSON.stringify({ status: "CREADO" })
             });
@@ -958,12 +1086,11 @@ export default function App() {
 
   const handleRequestCaseSubmit = async (title: string, desc: string, templateId: string, partyCounts?: { compradores: number; vendedores: number; garantes: number }) => {
     try {
-      const token = localStorage.getItem("token") || `real-jwt-token-for-${currentUser?.id}`;
       const response = await fetch("/api/case-requests", {
         method: "POST",
+        credentials: "include",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           title,
@@ -1060,21 +1187,25 @@ export default function App() {
             {/* Header / Brand info */}
             <div className="flex flex-col items-center text-center justify-center">
               <span className="text-[10px] font-bold uppercase tracking-widest text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded inline-block">
-                Se Requiere Acceso Verificado
+                {needsSetup ? "Configuración Inicial Única" : "Se Requiere Acceso Verificado"}
               </span>
               <h2 className="text-xl font-display font-semibold text-slate-950 mt-3">
-                {authMode === "login" 
+                {needsSetup
+                  ? "Inicializar Director General"
+                  : authMode === "login" 
                   ? "Identificarse en el Sistema" 
                   : authMode === "register" 
                   ? "Registro de Nuevo Asesor" 
                   : "Verificar Código de Seguridad"}
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                {authMode === "login"
+                {needsSetup
+                  ? "No existen administradores configurados. Cree la cuenta principal de Director General de forma segura."
+                  : authMode === "login"
                   ? "Ingrese sus credenciales para iniciar sesión."
                   : authMode === "register"
                   ? "Registre su cuenta para ser evaluado y confirmado por la dirección."
-                  : "Por favor confirme la acreditación de su contacto."}
+                  : "Ingrese el código de seguridad de 16 caracteres."}
               </p>
             </div>
 
@@ -1090,6 +1221,102 @@ export default function App() {
               </div>
             )}
 
+            {/* Initial Admin Bootstrap Form */}
+            {needsSetup ? (
+              <form onSubmit={handleSetupAdminSubmit} className="space-y-3.5">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Nombre del Director General
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={setupName}
+                    onChange={(e) => setSetupName(e.target.value)}
+                    placeholder="ej. Director General"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Correo Electrónico Administrativo
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={setupEmail}
+                    onChange={(e) => setSetupEmail(e.target.value)}
+                    placeholder="ej. director@empresa.com"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Teléfono Corporativo (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={setupPhone}
+                    onChange={(e) => setSetupPhone(e.target.value)}
+                    placeholder="ej. +541100000000"
+                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Contraseña Maestra (mínimo 8 caracteres)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSetupPassword ? "text" : "password"}
+                      required
+                      minLength={8}
+                      value={setupPassword}
+                      onChange={(e) => setSetupPassword(e.target.value)}
+                      placeholder="Contraseña segura"
+                      className="w-full text-xs p-2.5 pr-10 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSetupPassword(!showSetupPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                    >
+                      {showSetupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                {requiresBootstrapSecret && (
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                      Clave de Inicialización (BOOTSTRAP_ADMIN_SECRET)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={setupSecret}
+                      onChange={(e) => setSetupSecret(e.target.value)}
+                      placeholder="Secreto configurado en Wrangler"
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-mono"
+                    />
+                  </div>
+                )}
+
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  onToken={setTurnstileToken}
+                  resetSignal={turnstileResetSignal}
+                />
+
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-slate-950 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer shadow-md"
+                >
+                  {authLoading ? "Creando cuenta maestra..." : "Crear Administrador e Ingresar"}
+                </button>
+              </form>
+            ) : (
+              <>
             {/* LoginForm */}
             {authMode === "login" && (
               <form onSubmit={handleLoginSubmit} className="space-y-4">
@@ -1102,7 +1329,7 @@ export default function App() {
                     required
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
-                    placeholder="ej. asesor@test.com"
+                    placeholder="ej. usuario@empresa.com"
                     className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
                   />
                 </div>
@@ -1129,6 +1356,12 @@ export default function App() {
                   </div>
                 </div>
 
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  onToken={setTurnstileToken}
+                  resetSignal={turnstileResetSignal}
+                />
+
                 <button
                   type="submit"
                   disabled={authLoading}
@@ -1145,6 +1378,8 @@ export default function App() {
                         setAuthMode("register");
                         setAuthError("");
                         setAuthSuccess("");
+                        setTurnstileToken("");
+                        setTurnstileResetSignal(s => s + 1);
                       }}
                       className="text-teal-600 hover:underline font-bold"
                     >
@@ -1180,7 +1415,7 @@ export default function App() {
                     required
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="ej. Gabriel@test.com"
+                    placeholder="ej. gabriel@empresa.com"
                     className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-slate-800 font-medium font-sans"
                   />
                 </div>
@@ -1209,12 +1444,13 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Defina su Contraseña
+                    Defina su Contraseña (mínimo 8 caracteres)
                   </label>
                   <div className="relative">
                     <input
                       type={showRegPassword ? "text" : "password"}
                       required
+                      minLength={8}
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
                       placeholder="Defina clave segura"
@@ -1230,12 +1466,18 @@ export default function App() {
                   </div>
                 </div>
 
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  onToken={setTurnstileToken}
+                  resetSignal={turnstileResetSignal}
+                />
+
                 <button
                   type="submit"
                   disabled={authLoading}
                   className="w-full bg-slate-950 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer mt-2"
                 >
-                  {authLoading ? "Procesando registro..." : "Enviar Código y Registrarse"}
+                  {authLoading ? "Procesando registro..." : "Registrar Solicitud"}
                 </button>
 
                 <div className="text-center pt-3 border-t border-slate-100">
@@ -1247,6 +1489,8 @@ export default function App() {
                         setAuthMode("login");
                         setAuthError("");
                         setAuthSuccess("");
+                        setTurnstileToken("");
+                        setTurnstileResetSignal(s => s + 1);
                       }}
                       className="text-teal-600 hover:underline font-bold"
                     >
@@ -1261,12 +1505,12 @@ export default function App() {
             {authMode === "verify" && (
               <form onSubmit={handleVerifyTokenSubmit} className="space-y-4">
                 <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-xs text-slate-600 leading-normal">
-                  Hemos enviado un token de seguridad rústico de 16 caracteres compuesto por letras mayúsculas, minúsculas, números y símbolos para validar su titularidad. Ingréselo exactamente a continuación.
+                  Ingrese el código de verificación de un solo uso de 16 caracteres recibido por Cloudflare Email Service o proporcionado de forma segura por el Director General o Gerente desde el panel de aprobaciones.
                 </div>
 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Token Verificador de 16 Caracteres
+                    Código Verificador de 16 Caracteres
                   </label>
                   <input
                     type="text"
@@ -1283,7 +1527,7 @@ export default function App() {
                   disabled={authLoading}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-bold text-xs py-3 rounded-xl transition-all cursor-pointer"
                 >
-                  {authLoading ? "Validando Token..." : "Confirmar Mi Contacto"}
+                  {authLoading ? "Validando Código..." : "Confirmar Mi Contacto"}
                 </button>
 
                 <div className="text-center pt-2">
@@ -1302,8 +1546,8 @@ export default function App() {
                 </div>
               </form>
             )}
-
-
+              </>
+            )}
 
           </div>
         </div>
@@ -1988,7 +2232,6 @@ export default function App() {
           isOpen={profileModalOpen}
           onClose={() => setProfileModalOpen(false)}
           currentUser={currentUser}
-          token={localStorage.getItem("token") || ""}
           onRefreshUser={async () => {
             await checkStoredSession();
             await syncData();

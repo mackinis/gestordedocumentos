@@ -163,9 +163,17 @@ export type DocStatus =
 export interface DocumentVersion {
   version: number;
   fileName: string;
-  fileUrl: string; // Base64 mock
+  fileUrl: string; // URL autenticada de descarga R2 (/api/documents/download/...)
   uploadedAt: string;
   uploadedBy: string;
+}
+
+export interface DocumentAIAnalysis {
+  summary: string;
+  extractedFields: Record<string, string>;
+  observations: string[];
+  modelUsed: string;
+  analyzedAt?: string;
 }
 
 export interface Document {
@@ -182,6 +190,7 @@ export interface Document {
   uploadedBy?: string;
   version: number;
   history: DocumentVersion[];
+  aiAnalysis?: DocumentAIAnalysis | null;
 }
 
 export type TaskStatus = "PENDIENTE" | "EN_PROGRESO" | "COMPLETA";
