@@ -39,8 +39,9 @@ function DatabaseStartupGate() {
             <ellipse cx="24" cy="30" rx="15" ry="6" fill="#6982ef"/>
             <path d="M9 30v8c0 3.3 6.7 6 15 6s15-2.7 15-6v-8" fill="#314ec8"/>
           </svg>
-          <div style={{position:'absolute',left:'50%',top:'50%',marginLeft:-12,marginTop:-12,width:24,height:24,border:'3px solid rgba(255,255,255,.6)',borderTopColor:'#253ec7',borderRadius:'50%',animation:'database-spin 1.1s linear infinite'}} />
+
         </div>
+        <div aria-hidden="true" style={{width:22,height:22,border:'3px solid #d6dff5',borderTopColor:'#4865df',borderRadius:'50%',animation:'database-spin 1.1s linear infinite',marginTop:0,marginBottom:0}} />
         <div style={{fontSize:19,fontWeight:650,letterSpacing:'-.02em'}}>Preparando la base de datos</div>
         <p style={{fontSize:14,lineHeight:1.65,margin:0,color:'#52627d'}}>Estamos trabajando en la base de datos. Aguarde a que termine.</p>
       </div>
