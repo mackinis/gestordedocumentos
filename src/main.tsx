@@ -5,9 +5,11 @@ import './index.css';
 
 function DatabaseStartupGate() {
   const [ready, setReady] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const warning = setTimeout(() => { if (!cancelled) setTimedOut(true); }, 45000);
     const check = async () => {
       try {
         const response = await fetch('/api/health', { credentials: 'include', cache: 'no-store' });
@@ -24,7 +26,7 @@ function DatabaseStartupGate() {
       if (!cancelled) timeout = setTimeout(check, 5000);
     };
     void check();
-    return () => { cancelled = true; if (timeout) clearTimeout(timeout); };
+    return () => { cancelled = true; if (timeout) clearTimeout(timeout); clearTimeout(warning); };
   }, []);
   if (!ready) return (
     <div role="status" aria-live="polite" style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(145deg,#f5f7fc,#edf3fa)',color:'#14233d',fontFamily:'system-ui, sans-serif',padding:24,textAlign:'center'}}>
@@ -43,7 +45,7 @@ function DatabaseStartupGate() {
         </div>
         <div aria-hidden="true" style={{width:22,height:22,border:'3px solid #d6dff5',borderTopColor:'#4865df',borderRadius:'50%',animation:'database-spin 1.1s linear infinite',marginTop:0,marginBottom:0}} />
         <div style={{fontSize:19,fontWeight:650,letterSpacing:'-.02em'}}>Preparando la base de datos</div>
-        <p style={{fontSize:14,lineHeight:1.65,margin:0,color:'#52627d'}}>Estamos trabajando en la base de datos. Aguarde a que termine.</p>
+        <p style={{fontSize:14,lineHeight:1.65,margin:0,color:'#52627d'}}>{timedOut ? 'La preparación está tardando más de lo esperado. El sistema continúa intentando conectarse. Contacte al administrador.' : 'Estamos trabajando en la base de datos. Aguarde a que termine.'}</p>
       </div>
     </div>
   );
