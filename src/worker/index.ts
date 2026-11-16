@@ -72,8 +72,9 @@ app.get("/api/health", async (c) => {
     checks.r2 = `error: ${err?.message || "failed"}`;
   }
 
-  const healthy = checks.d1 === "ok" && checks.kv === "ok" && checks.r2 === "ok";
-  return c.json({ ok: healthy, checks }, healthy ? 200 : 503);
+  // The startup gate requires D1 only. KV and R2 remain diagnostic checks.
+  const databaseReady = checks.d1 === "ok";
+  return c.json({ ok: databaseReady, status: databaseReady ? "ok" : "degraded", checks }, databaseReady ? 200 : 503);
 });
 
 // Register API route modules
