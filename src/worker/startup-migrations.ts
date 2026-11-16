@@ -9,7 +9,12 @@ export async function ensureDatabaseReady(db: D1Database): Promise<void> {
   if (initialized) return;
   if (!inFlight) {
     inFlight = (async () => {
-      await db.prepare('CREATE TABLE IF NOT EXISTS app_schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)').run();
+      try {
+        await db.prepare('CREATE TABLE IF NOT EXISTS app_schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)').run();
+      } catch (error) {
+        console.error('[D1 migration] Failed to initialize migration ledger:', error instanceof Error ? error.message : String(error));
+        throw error;
+      }
       for (const migration of migrations) {
         const applied = await db.prepare('SELECT name FROM app_schema_migrations WHERE name = ?').bind(migration.name).first();
         if (applied) continue;
@@ -23,8 +28,13 @@ export async function ensureDatabaseReady(db: D1Database): Promise<void> {
           .split(';')
           .map((statement) => statement.trim())
           .filter((statement) => statement && !/^PRAGMA\s+foreign_keys\s*=/i.test(statement));
-        for (const statement of statements) {
-          await db.prepare(statement).run();
+        for (const [index, statement] of statements.entries()) {
+          try {
+            await db.prepare(statement).run();
+          } catch (error) {
+            console.error('[D1 migration] Statement failed', { migration: migration.name, index: index + 1, total: statements.length, operation: statement.slice(0, 140), error: error instanceof Error ? error.message : String(error) });
+            throw error;
+          }
         }
         await db.prepare('INSERT OR IGNORE INTO app_schema_migrations (name, applied_at) VALUES (?, ?)').bind(migration.name, new Date().toISOString()).run();
       }
